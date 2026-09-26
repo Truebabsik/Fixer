@@ -8,9 +8,14 @@ extends RefCounted
 const Sim := preload("res://sim/sim.gd")
 
 
-static func run_scenario(mission, plan, script: Array = [], config := {}) -> Dictionary:
+## `sim_out` — необязательный приёмник: если передан, в него кладётся сам `Sim`
+## после прогона. Нужен там, где проверять надо не отчёт, а состояние мира
+## (например, открытые двери живут в `Sim.unlocked`, а не в отчёте).
+static func run_scenario(mission, plan, script: Array = [], config := {}, sim_out = null) -> Dictionary:
 	var sim := Sim.new()
 	sim.setup(mission, plan, config)
+	if sim_out != null:
+		sim_out.set_meta("sim", sim)
 	var index := 0
 	var guard := 0
 	while not sim.finished and guard < Sim.MAX_STEPS * 2:

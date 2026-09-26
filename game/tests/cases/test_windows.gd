@@ -3,6 +3,7 @@ extends RefCounted
 
 const Assert := preload("res://tests/assert.gd")
 const Fixture := preload("res://tests/fixtures/small_mission.gd")
+const Mission := preload("res://sim/mission.gd")
 const Plan := preload("res://sim/plan.gd")
 const Sim := preload("res://sim/sim.gd")
 ## Имя константы не может быть `Window`: в Godot 4.7 это тень нативной ноды
@@ -47,13 +48,17 @@ func run() -> Array:
 	t.eq("при открытом окне шагов нет", sim.scales.step, step_before)
 
 	# 2. Молчание: приказ не тратится, эфир молчит, дверь открывают обходом.
+	# Открытие живёт в Sim (unlocked), а миссия остаётся неизменяемыми данными:
+	# `mission.edge(...)["locked"]` после прогона обязан быть тем же, что и до него.
+	t.is_true("дверь заперта на входе", bool(sim.mission.edge("e_office_vault")["locked"]))
 	var sil: Dictionary = sim.order("silence")
 	t.is_true("молчание принято", sil["accepted"])
 	t.eq("вид ответа", String(sil["kind"]), "silence")
 	t.eq("приказы целы", sim.orders_left, 3)
 	t.eq("эфир молчит", sim.radio.radio, 0)
 	t.eq("окно закрылось", sim.current_window, null)
-	t.is_false("дверь открыта обходом", bool(sim.mission.edge("e_office_vault")["locked"]))
+	t.is_true("дверь открыта обходом", bool(sim.unlocked.get("e_office_vault", false)))
+	t.is_true("миссия не тронута", bool(sim.mission.edge("e_office_vault")["locked"]))
 	t.eq("обход стоит времени", sim.own[0].delay, 3)
 
 	# 3. Приказ: тратит пул, шумит и уходит в эфир.
@@ -68,7 +73,8 @@ func run() -> Array:
 	t.eq("эфир вырос", sim2.radio.radio, 8)
 	t.eq("отпечаток вырос", sim2.radio.imprint, 1)
 	t.eq("шум выбитой двери", sim2.scales.noise - noise_before, 8)
-	t.is_false("дверь открыта силой", bool(sim2.mission.edge("e_office_vault")["locked"]))
+	t.is_true("дверь открыта силой", bool(sim2.unlocked.get("e_office_vault", false)))
+	t.is_true("миссия не тронута", bool(sim2.mission.edge("e_office_vault")["locked"]))
 
 	# 4. Отказы приходят с причиной и НЕ закрывают окно: иначе игрок терял бы
 	# решение из-за отказа, а харнесс задачи 11 не смог бы отступить к молчанию.
@@ -119,4 +125,89 @@ func run() -> Array:
 	t.eq("решает тактик", String(eff_c["by"]), "tactician")
 	t.eq("тактик не рискует", String(eff_c["quality"]), "safe")
 
+	# 8. Запертая дверь симметрична: подход со стороны `b` открывает окно так же,
+	# как со стороны `a`. Пока проверялось `a.node == e["a"]`, агент, идущий против
+	# записи ребра, стоял бы до caught/timeout без окна и без события.
+	var back = _make_b_side()
+	back.advance()
+	t.is_true("окно открылось со стороны b", back.current_window != null)
+	t.eq("вид окна со стороны b", String(back.current_window["kind"]), "locked_door")
+	t.eq("окно называет то же ребро", String(back.current_window["edge"]), "e_cell_hall")
+	t.is_true("событие окна тоже есть", _has_event(back, "window_opened"))
+	t.is_true("дверь со стороны b открывается приказом", bool(back.order("pick")["accepted"]))
+	t.is_true("дверь со стороны b открыта", bool(back.unlocked.get("e_cell_hall", false)))
+	t.is_true("миссия не тронута", bool(back.mission.edge("e_cell_hall")["locked"]))
+	# И после открытия агент действительно идёт — а не стоит у открытой двери.
+	# `pick` стоит 2 шага задержки, поэтому дверь он проходит на четвёртом шаге.
+	for i in 2:
+		back.advance()
+	t.eq("задержка вскрытия отработана", back.own[0].node, "cell")
+	back.advance()
+	t.eq("агент со стороны b прошёл дверь", back.own[0].node, "hall")
+	back.advance()
+	t.eq("агент со стороны b дошёл до цели", back.own[0].node, "exit")
+	t.eq("миссия со стороны b завершилась уходом", String(back.result()["outcome"]), "extracted")
+
+	# 9. Завершённая миссия окна не открывает, и приказов после конца нет.
+	# `finished` был достижим при открытом окне: _check_end() шёл перед
+	# _maybe_open_window(), и первый же приказ открывал окно, которое уже некому
+	# закрыть. Теперь конец миссии снимает окно, а order() отказывает с причиной.
+	var dead = _make({"orders": 3})
+	_to_window(dead)
+	var sil_dead: Dictionary = dead.order("silence")
+	t.is_true("обход принят перед смертью", sil_dead["accepted"])
+	for i in 3:
+		dead._compromise(dead.own[0])
+	# Агент в доке — выход, но цель не взята, поэтому уход не зачитывается;
+	# счётчик шагов доводит миссию до исхода timeout.
+	for i in 500:
+		dead.advance()
+	t.eq("миссия окончена", String(dead.result()["outcome"]), "timeout")
+	t.eq("окна при исходе нет", dead.current_window, null)
+	var after: Dictionary = dead.order("breach")
+	t.is_false("после конца приказ не принят", after["accepted"])
+	t.eq("после конца названа причина", String(after["reason"]), "finished")
+	t.eq("приказы после конца не списаны", dead.orders_left, 3)
+	var step_late: int = dead.scales.step
+	dead.advance()
+	t.eq("мир после конца не идёт", dead.scales.step, step_late)
+	t.eq("окно после конца не открывается", dead.current_window, null)
+
+	# 9б. Сам сторож `_maybe_open_window`: даже если конец миссии выставлен
+	# извне, окно не появится. Это отдельная ветка — проверяем её напрямую.
+	var guard_case = _make({"orders": 3})
+	_to_window(guard_case)
+	guard_case.finished = true
+	guard_case._maybe_open_window()
+	t.eq("завершённая миссия окна не открывает", guard_case.current_window, null)
+
 	return t.results
+
+
+## Подход к запертой двери СО СТОРОНЫ `b`. В фикстуре запертая дверь ведёт в
+## тупик (vault), поэтому маршрут «из vault» был бы разорван: соберём маленькую
+## миссию, где дверь — обычный проход, записанный как `a` -> `b`.
+func _make_b_side():
+	var m := Mission.new()
+	m.id = "b_side"
+	m.add_node("cell", 1, [])
+	m.add_node("hall", 1, [])
+	m.add_node("exit", 1, [])
+	m.add_edge("e_cell_hall", "cell", "hall", "door", 1, 0, true)
+	m.add_edge("e_hall_exit", "hall", "exit", "corridor", 1, 0)
+	m.objective = "exit"
+	var p := Plan.new()
+	p.route = ["cell", "hall", "exit"]
+	p.exit_node = "exit"
+	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
+	var sim := Sim.new()
+	sim.setup(m, p, {"orders": 3, "seed": 1})
+	sim.guards = []
+	return sim
+
+
+func _has_event(sim, type: String) -> bool:
+	for e in sim.events:
+		if String(e["type"]) == type:
+			return true
+	return false

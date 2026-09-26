@@ -28,6 +28,10 @@ func run() -> Array:
 	t.eq("охрана стартует в холле", sim.guards[0].node, "hall")
 	t.is_true("холл под сенсором — охрана видна", sim.is_visible(sim.guards[0]))
 	t.is_false("призрак пока совпадает", sim.ghost_mismatch())
+	# Маршрут патруля — КОПИЯ, а не ссылка на массив миссии. Пока это была ссылка,
+	# охрана и миссия делили один массив, и прогон мог править вход другого прогона.
+	t.eq("маршрут патруля совпадает по содержимому", sim.guards[0].patrol_route, m.patrols[0]["route"])
+	t.is_true("маршрут патруля — копия", not is_same(sim.guards[0].patrol_route, m.patrols[0]["route"]))
 
 	sim.advance()
 	t.eq("контакт зафиксирован один раз", _count(sim, "sensor_contact"), 1)

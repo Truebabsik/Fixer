@@ -23,6 +23,10 @@ var response
 var own: Array = []
 var guards: Array = []
 var events: Array = []
+## id ребра -> true, если дверь открыта приказом или молчанием. Состояние живёт
+## в Sim, а не в Mission: миссия — неизменяемые данные, и один и тот же её объект
+## обязан давать одинаковый исход при повторном прогоне (D7).
+var unlocked: Dictionary = {}
 var ghost_positions: Dictionary = {}
 var visible_last: Dictionary = {}
 var ghost_reported: Dictionary = {}
@@ -34,6 +38,10 @@ var current_window = null
 var objective_done := false
 var finished := false
 var outcome := ""
+
+## Ключи config, которые setup() читает. Неизвестный ключ — почти всегда опечатка
+## (`orders_left` вместо `orders`), и молча терять её нельзя.
+const CONFIG_KEYS := ["orders", "seed", "noise_start"]
 
 
 func setup(mission_, plan_, config := {}) -> void:
@@ -47,6 +55,7 @@ func setup(mission_, plan_, config := {}) -> void:
 	events = []
 	own = []
 	guards = []
+	unlocked = {}
 	ghost_positions = {}
 	visible_last = {}
 	ghost_reported = {}
@@ -56,9 +65,21 @@ func setup(mission_, plan_, config := {}) -> void:
 	finished = false
 	outcome = ""
 
+	# Вход проверяется ДО того, как ядро начнёт считать: неверная миссия или
+	# разорванный маршрут обязаны кончиться громким invalid_mission, а не тихо
+	# притвориться caught/timeout. Так балансировщик узнаёт об опечатке в данных
+	# из кода возврата и отчёта, а не из «странных» исходов.
+	var problems: Array = mission.validate()
+	problems.append_array(mission.validate_route(plan.route))
+	for key in config:
+		if not CONFIG_KEYS.has(String(key)):
+			problems.append("неизвестный ключ config: %s" % key)
 	if plan.route.is_empty():
+		problems.append("маршрут пуст")
+	if not problems.is_empty():
 		finished = true
-		outcome = "no_route"
+		outcome = "invalid_mission"
+		_emit("invalid_mission", {"problems": problems})
 		return
 
 	var start := String(plan.route[0])
@@ -78,7 +99,9 @@ func setup(mission_, plan_, config := {}) -> void:
 		guard.id = String(p["id"])
 		guard.kind = Agent.Kind.GUARD
 		guard.node = String(p["route"][0])
-		guard.patrol_route = p["route"]
+		## duplicate(true) — глубокая копия: охрана не имеет права писать в массив
+		## миссии, иначе прогон менял бы вход для следующего прогона.
+		guard.patrol_route = p["route"].duplicate(true)
 		guard.patrol_index = 0
 		guard.patrol_period = int(p.get("period", 4))
 		guards.append(guard)
@@ -109,7 +132,12 @@ func advance() -> Array:
 	_check_contacts()
 	_check_objective()
 	_check_end()
-	_maybe_open_window()
+	# Инвариант «исход есть — окна нет» держим по построению, а не по случайности
+	# порядка вызовов: конец миссии закрывает окно и снимает возможность приказа.
+	if finished:
+		current_window = null
+	else:
+		_maybe_open_window()
 	return events.slice(from)
 
 
@@ -174,7 +202,7 @@ func _advance_own() -> void:
 		var e: Dictionary = mission.edge_between(a.node, target)
 		if e.is_empty():
 			continue
-		if bool(e.get("locked", false)):
+		if _is_locked(e):
 			continue                  # упёрлись в запертую дверь: её откроет окно
 		if a.progress == 0 and response.edge_blocked(String(e["kind"]), scales.step):
 			_emit("path_blocked", {"agent": a.id, "edge": e["id"], "kind": e["kind"]})
@@ -287,7 +315,7 @@ func _check_end() -> void:
 			outcome = "extracted"
 			_emit("mission_ended", {"outcome": outcome})
 			return
-	if response.has_arrived(scales.step):
+	if response.has_arrived(scales.step, radio.is_intercepted()):
 		finished = true
 		outcome = "caught"
 		_emit("mission_ended", {"outcome": outcome})
@@ -298,8 +326,23 @@ func _check_end() -> void:
 		_emit("mission_ended", {"outcome": outcome})
 
 
+## Заперто ли ребро ПРЯМО СЕЙЧАС. Состояние открытия — в Sim (unlocked), а
+## mission.edge(id)["locked"] — только исходные данные миссии.
+func _is_locked(e: Dictionary) -> bool:
+	if not bool(e.get("locked", false)):
+		return false
+	return not bool(unlocked.get(String(e["id"]), false))
+
+
 ## Окно открывается, когда план упёрся в запертую дверь.
+## Запертая дверь симметрична: подход со стороны `b` упирается в неё так же, как
+## со стороны `a`, и обязан открыть окно. Иначе агент, идущий «против» записи
+## ребра, молча стоял бы до caught/timeout, не получив ни окна, ни события.
+## Завершённая миссия окна не открывает: его некому закрыть (D4).
 func _maybe_open_window() -> void:
+	if finished:
+		current_window = null
+		return
 	current_window = null
 	for a in own:
 		if a.is_dead() or a.node == plan.exit_node:
@@ -310,7 +353,7 @@ func _maybe_open_window() -> void:
 		var e: Dictionary = mission.edge_between(a.node, target)
 		if e.is_empty():
 			continue
-		if bool(e.get("locked", false)) and a.node == String(e["a"]):
+		if _is_locked(e):
 			current_window = WindowScript.locked_door(String(e["id"]), a.id)
 			_emit("window_opened", {"kind": "locked_door", "edge": e["id"], "agent": a.id})
 			return
@@ -318,6 +361,10 @@ func _maybe_open_window() -> void:
 
 ## Приказ или молчание. Возвращает решение и причину отказа, если он есть.
 func order(option_id: String) -> Dictionary:
+	# После конца миссии приказов нет: иначе отчёт правился бы задним числом,
+	# а «исход уже есть, но окно ещё открыто» стало бы достижимым состоянием.
+	if finished:
+		return {"accepted": false, "reason": "finished"}
 	if current_window == null:
 		return {"accepted": false, "reason": "no_window"}
 	var w: Dictionary = current_window
@@ -413,7 +460,7 @@ func _apply_delay(w: Dictionary, amount: int) -> void:
 func _unlock(w: Dictionary) -> void:
 	var edge_id := String(w.get("edge", ""))
 	if edge_id != "":
-		mission.edge(edge_id)["locked"] = false
+		unlocked[edge_id] = true
 
 
 ## Свидетель. Один триггер ранит, три убивают — не наоборот (design.md §13.5).
