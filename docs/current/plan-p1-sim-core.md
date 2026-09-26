@@ -32,6 +32,8 @@
 |---|---|
 | `game/tests/assert.gd` | Мини-ассерты: копит результаты, ничего не печатает |
 | `game/tests/run.gd` | Раннер: явный список кейсов, вердикт = код возврата |
+| `game/tests/run_red.gd` | Красный путь: грузит заведомо падающий кейс, обязан вернуть код 1 |
+| `game/tests/red_path.gd` | Сам заведомо падающий кейс (в `CASES` обычного раннера не входит) |
 | `game/tests/cases/test_runner.gd` | Самопроверка раннера |
 | `game/sim/scales.gd` | Шум и три состояния тревоги. Плюс часы симуляции |
 | `game/sim/radio.gd` | Эфир: затухание, глушение, отпечаток, перехват |
@@ -1116,6 +1118,8 @@ git add game/sim/sim.gd game/sim/response.gd game/tests/cases/test_movement.gd g
 git commit -m "feat(sim): шаг мира — движение по плану, стоимость переходов, автопауза"
 ```
 
+> **Правка после финального ревью ветки.** Найденное: `setup()` не проверял вход, а `no_route` был исходом, которого ничто, кроме пустого маршрута, не порождает. Теперь `setup()` зовёт `mission.validate()` и `mission.validate_route(plan.route)` **до** первого шага и на любой проблеме (включая пустой маршрут и неизвестный ключ `config`) выставляет `finished = true`, `outcome = "invalid_mission"` и публикует событие `invalid_mission` со списком проблем. Исход `no_route` убран как недостижимый: неверный вход не должен притворяться `caught`/`timeout`. Сниппет выше оставлен как исходная редакция.
+
 ### Task 7: Сенсоры и призраки
 
 **Files:**
@@ -2175,7 +2179,8 @@ git commit -m "feat(sim): харнесс прогонов и проверка д
 
 - **Покрытие документа.** Шум и тревога — Task 2, эфир — Task 3, Понимание — Task 4, вертикаль и стоимость переходов — Task 6, сенсоры и призраки — Task 7, окна и молчание — Task 8, тревога как перелом и группа реагирования — Task 9, ранения и обещание «один промах не убивает» — Task 10, харнесс и детерминизм — Task 11. Числа взяты из `spr/scales.md`, а не придуманы.
 - **Что не покрыто и почему.** Цена специалистов и экономика миссии не проверяются кодом П1 — они лежат в данных (`spr/mercs.md`) и станут проверяемыми только с контент-конвейером. Доля вмешательства (цель 30–40 %) требует прогонов на реальной миссии, то есть после П3.
-- **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `WindowScript.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/perimeter_closed/edge_blocked`, `Harness.run_scenario/digest` — используются во всех задачах одинаково.
-- **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, цель, конец миссии, окно — окно последнее. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве — `mission.edge(id)["locked"] = false` меняет миссию, и это намеренно.
+- **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `WindowScript.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/edge_blocked`, `Harness.run_scenario/digest` — используются всеми задачами одинаково.
+  **Кроме них объявлены, но потребителя в П1 не имеют:** `Response.perimeter_closed` (периметр — ступень П2, D35) и `Understanding.resolves_literally` вместе с полем `complexity` в вариантах окна (буквальность — про наёмных специалистов, они в П2, D36). Эти два имени **не** «используются во всех задачах»: у них есть объявление, тест на саму функцию и запись в журнале решений с условием возврата. Раньше строка утверждала равномерность использования для всего списка — это было неверно.
+- **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, цель, конец миссии, окно — окно последнее, и при `finished` оно не открывается вовсе. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве: **писать в него нельзя.** Открытая дверь живёт в `Sim.unlocked`, потому что миссия — неизменяемые данные, а один и тот же объект миссии обязан давать один и тот же исход при повторном прогоне (D7).
 
 
