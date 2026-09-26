@@ -21,6 +21,7 @@
 - **Отступы — табы** (конвенция Godot). Идентификаторы английские, комментарии и имена тестов русские.
 - **Объекты из `preload`-скриптов создавать через `:=`:** `var s := Scales.new()`. С обычным `=` переменная выходит **нетипизированной**, и любой последующий `var x := s.field` не компилируется (`Cannot infer the type`). По той же причине **никогда не применять `:=` к члену переменной, объявленной через `=`** — в тестах, где объект приходит из функции без аннотации (`var sim = _make(...)`), писать явный тип: `var before: int = sim.scales.step`.
 - **Исключение из этого правила — объекты из функций без аннотации возврата** (такова фикстура: `static func build()` без `-> ...`). Там `:=` не выведет тип вовсе, а если аннотировать возврат как `RefCounted`, перестанет компилироваться доступ к членам. Поэтому для фикстуры и подобных ей фабрик **остаётся `=` и динамический доступ**. Правило про `:=` — про объекты, создаваемые напрямую из `preload`-константы (`Scales.new()`, `Plan.new()`).
+- **Имя константы `preload` не должно совпадать с классом движка.** `const Window := preload("res://sim/window.gd")` — **жёсткая ошибка разбора** в Godot 4.7.2 (`shadows a native class`), поэтому модуль окна подключён как `WindowScript`. Перед тем как завести константу, проверять имя на совпадение с классом движка.
 - **Все команды выполнять из `F:\WORK\Fixer`.**
 
 ---
@@ -1246,7 +1247,7 @@ git commit -m "feat(sim): сенсоры и призраки — что видн
 **Interfaces:**
 - Consumes: `Radio`, `Understanding`, `Agent.role`.
 - Produces:
-  - `Window.locked_door(edge_id, agent_id) -> Dictionary`, `Window.SILENCE = "silence"`.
+  - `WindowScript.locked_door(edge_id, agent_id) -> Dictionary`, `WindowScript.SILENCE = "silence"`.
   - `Sim.current_window`, `Sim.order(option_id) -> Dictionary` (`{"accepted": bool, "kind", "reason"?, "effect"?}`), `Sim._compromise(agent)` (понадобится в Task 10).
 
 **Три правила, которые здесь кодируются:**
@@ -1296,7 +1297,7 @@ const Assert := preload("res://tests/assert.gd")
 const Fixture := preload("res://tests/fixtures/small_mission.gd")
 const Plan := preload("res://sim/plan.gd")
 const Sim := preload("res://sim/sim.gd")
-const Window := preload("res://sim/window.gd")
+const WindowScript := preload("res://sim/window.gd")
 
 
 func _make(config := {}, agents := null):
@@ -1324,7 +1325,7 @@ func run() -> Array:
 	_to_window(sim)
 	t.is_true("окно открыто", sim.current_window != null)
 	t.eq("вид окна", String(sim.current_window["kind"]), "locked_door")
-	t.is_true("у окна всегда есть молчание", Window.has_silence(sim.current_window))
+	t.is_true("у окна всегда есть молчание", WindowScript.has_silence(sim.current_window))
 	var step_before: int = sim.scales.step
 	sim.advance()
 	t.eq("при открытом окне шагов нет", sim.scales.step, step_before)
@@ -1400,7 +1401,7 @@ Expected: `LOAD FAIL  res://tests/cases/test_windows.gd`, `код: 1`.
 Добавить константу рядом с остальными `preload`:
 
 ```gdscript
-const Window := preload("res://sim/window.gd")
+const WindowScript := preload("res://sim/window.gd")
 ```
 
 В `advance()` после `_update_visibility()` вставить `_maybe_open_window()`.
@@ -1428,7 +1429,7 @@ func _maybe_open_window() -> void:
 		if e.is_empty():
 			continue
 		if bool(e.get("locked", false)) and a.node == String(e["a"]):
-			current_window = Window.locked_door(String(e["id"]), a.id)
+			current_window = WindowScript.locked_door(String(e["id"]), a.id)
 			_emit("window_opened", {"kind": "locked_door", "edge": e["id"], "agent": a.id})
 			return
 
@@ -1438,7 +1439,7 @@ func order(option_id: String) -> Dictionary:
 	if current_window == null:
 		return {"accepted": false, "reason": "no_window"}
 	var w: Dictionary = current_window
-	if option_id == Window.SILENCE:
+	if option_id == WindowScript.SILENCE:
 		var eff := _resolve_silence(w)
 		_apply_silence(w, eff)
 		current_window = null
@@ -2083,7 +2084,7 @@ git commit -m "feat(sim): харнесс прогонов и проверка д
 
 - **Покрытие документа.** Шум и тревога — Task 2, эфир — Task 3, Понимание — Task 4, вертикаль и стоимость переходов — Task 6, сенсоры и призраки — Task 7, окна и молчание — Task 8, тревога как перелом и группа реагирования — Task 9, ранения и обещание «один промах не убивает» — Task 10, харнесс и детерминизм — Task 11. Числа взяты из `spr/scales.md`, а не придуманы.
 - **Что не покрыто и почему.** Цена специалистов и экономика миссии не проверяются кодом П1 — они лежат в данных (`spr/mercs.md`) и станут проверяемыми только с контент-конвейером. Доля вмешательства (цель 30–40 %) требует прогонов на реальной миссии, то есть после П3.
-- **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `Window.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/perimeter_closed/edge_blocked`, `Harness.run_scenario/digest` — используются во всех задачах одинаково.
+- **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `WindowScript.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/perimeter_closed/edge_blocked`, `Harness.run_scenario/digest` — используются во всех задачах одинаково.
 - **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, окно, конец. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве — `mission.edge(id)["locked"] = false` меняет миссию, и это намеренно.
 
 
