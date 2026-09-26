@@ -22,6 +22,7 @@ var guards: Array = []
 var events: Array = []
 var ghost_positions: Dictionary = {}
 var visible_last: Dictionary = {}
+var ghost_reported: Dictionary = {}
 var orders_left: int = 3
 var rng := RandomNumberGenerator.new()
 var current_window = null
@@ -43,6 +44,7 @@ func setup(mission_, plan_, config := {}) -> void:
 	guards = []
 	ghost_positions = {}
 	visible_last = {}
+	ghost_reported = {}
 	current_window = null
 	objective_done = false
 	finished = false
@@ -79,6 +81,7 @@ func setup(mission_, plan_, config := {}) -> void:
 	for g in guards:
 		ghost_positions[g.id] = g.node
 		visible_last[g.id] = false
+		ghost_reported[g.id] = false
 
 	scales.add_noise(int(config.get("noise_start", 0)))
 	_emit("mission_started", {"node": start})
@@ -185,9 +188,30 @@ func _advance_guards() -> void:
 		_emit("guard_moved", {"agent": g.id, "node": g.node})
 
 
-## Заготовки под Task 7; пока ничего не делают — их наполняет следующий шаг.
+func is_visible(guard) -> bool:
+	for s in mission.sensors:
+		if s["nodes"].has(guard.node):
+			return true
+	return false
+
+
+func ghost_mismatch() -> bool:
+	for g in guards:
+		if String(ghost_positions.get(g.id, "")) != g.node:
+			return true
+	return false
+
+
 func _update_visibility() -> void:
-	pass
+	for g in guards:
+		var seen := is_visible(g)
+		if seen and not bool(visible_last.get(g.id, false)):
+			_emit("sensor_contact", {"agent": g.id, "node": g.node})
+		visible_last[g.id] = seen
+		var ghost := String(ghost_positions.get(g.id, ""))
+		if ghost != g.node and not bool(ghost_reported.get(g.id, false)):
+			ghost_reported[g.id] = true
+			_emit("ghost_mismatch", {"agent": g.id, "ghost": ghost, "real": g.node})
 
 
 func _check_objective() -> void:
