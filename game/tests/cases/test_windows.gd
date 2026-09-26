@@ -66,12 +66,14 @@ func run() -> Array:
 	t.eq("шум выбитой двери", sim2.scales.noise - noise_before, 8)
 	t.is_false("дверь открыта силой", bool(sim2.mission.edge("e_office_vault")["locked"]))
 
-	# 4. Отказы приходят с причиной.
+	# 4. Отказы приходят с причиной и НЕ закрывают окно: иначе игрок терял бы
+	# решение из-за отказа, а харнесс задачи 11 не смог бы отступить к молчанию.
 	var sim3 = _make({"orders": 0})
 	_to_window(sim3)
 	var no_orders: Dictionary = sim3.order("breach")
 	t.is_false("без приказов отказ", no_orders["accepted"])
 	t.eq("причина названа", String(no_orders["reason"]), "no_orders")
+	t.is_true("окно осталось открытым", sim3.current_window != null)
 
 	var sim4 = _make()
 	_to_window(sim4)
@@ -79,8 +81,20 @@ func run() -> Array:
 	var jammed: Dictionary = sim4.order("breach")
 	t.is_false("заглушённому отказ", jammed["accepted"])
 	t.eq("причина названа", String(jammed["reason"]), "jammed")
+	t.is_true("окно осталось открытым", sim4.current_window != null)
 
-	# 5. Молчание со связистом: импровизация, но детерминированная по seed.
+	# 5. Неизвестный вариант отвергается, не тратя приказ. Иначе опечатка в
+	# идентификаторе молча сжигала бы приказ, шумела в эфир и отчитывалась успехом.
+	var sim5 = _make()
+	_to_window(sim5)
+	var unknown: Dictionary = sim5.order("нет_такого_варианта")
+	t.is_false("неизвестный вариант отвергнут", unknown["accepted"])
+	t.eq("причина названа", String(unknown["reason"]), "unknown_option")
+	t.eq("приказ не потрачен", sim5.orders_left, 3)
+	t.eq("эфир молчит", sim5.radio.radio, 0)
+	t.is_true("окно осталось открытым", sim5.current_window != null)
+
+	# 6. Молчание со связистом: импровизация, но детерминированная по seed.
 	var crew := [
 		{"id": "kira", "role": "tactician", "understanding": 3},
 		{"id": "echo", "role": "comms", "understanding": 3},
@@ -94,7 +108,7 @@ func run() -> Array:
 	t.eq("тот же seed — та же импровизация", eff_a, eff_b)
 	t.is_true("импровизировал связист", String(eff_a["by"]) == "comms")
 
-	# 6. Без связиста молчание всегда безопасно.
+	# 7. Без связиста молчание всегда безопасно.
 	var c = _make({"seed": 7})
 	_to_window(c)
 	var eff_c: Dictionary = c.order("silence")["effect"]

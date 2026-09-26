@@ -257,6 +257,16 @@ func order(option_id: String) -> Dictionary:
 		current_window = null
 		_emit("order_silenced", {"window": w["id"], "effect": eff})
 		return {"accepted": true, "kind": "silence", "effect": eff}
+	# Проверка варианта — ДО списания. Иначе опечатка в идентификаторе сожгла бы
+	# приказ, добавила передачу в эфир и вернула «принято» — а харнесс задачи 11
+	# верит полю accepted и не отступил бы к молчанию.
+	var known := false
+	for o in w["options"]:
+		if String(o["id"]) == option_id:
+			known = true
+	if not known:
+		_emit("order_refused", {"window": w["id"], "reason": "unknown_option"})
+		return {"accepted": false, "reason": "unknown_option"}
 	if orders_left <= 0:
 		_emit("order_refused", {"window": w["id"], "reason": "no_orders"})
 		return {"accepted": false, "reason": "no_orders"}
