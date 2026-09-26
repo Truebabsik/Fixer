@@ -19,6 +19,9 @@
 - **Вердикт — код возврата процесса.** `quit(0)` = зелёно, `quit(1)` = провал. Наличие текста в stderr — **не** признак провала: Godot пишет туда безобидный шум (`Failed to read the root certificate store`, `Cannot save file editor_settings`) даже при коде 0.
 - **Числа берутся дословно** из `docs/spr/scales.md`. Не подбирать «на глаз» в коде.
 - **Отступы — табы** (конвенция Godot). Идентификаторы английские, комментарии и имена тестов русские.
+- **Объекты из `preload`-скриптов создавать через `:=`:** `var s := Scales.new()`. С обычным `=` переменная выходит **нетипизированной**, и любой последующий `var x := s.field` не компилируется (`Cannot infer the type`). По той же причине **никогда не применять `:=` к члену переменной, объявленной через `=`** — в тестах, где объект приходит из функции без аннотации (`var sim = _make(...)`), писать явный тип: `var before: int = sim.scales.step`.
+- **Исключение из этого правила — объекты из функций без аннотации возврата** (такова фикстура: `static func build()` без `-> ...`). Там `:=` не выведет тип вовсе, а если аннотировать возврат как `RefCounted`, перестанет компилироваться доступ к членам. Поэтому для фикстуры и подобных ей фабрик **остаётся `=` и динамический доступ**. Правило про `:=` — про объекты, создаваемые напрямую из `preload`-константы (`Scales.new()`, `Plan.new()`).
+- **Имя константы `preload` не должно совпадать с классом движка.** `const Window := preload("res://sim/window.gd")` — **жёсткая ошибка разбора** в Godot 4.7.2 (`shadows a native class`), поэтому модуль окна подключён как `WindowScript`. Перед тем как завести константу, проверять имя на совпадение с классом движка.
 - **Все команды выполнять из `F:\WORK\Fixer`.**
 
 ---
@@ -29,6 +32,8 @@
 |---|---|
 | `game/tests/assert.gd` | Мини-ассерты: копит результаты, ничего не печатает |
 | `game/tests/run.gd` | Раннер: явный список кейсов, вердикт = код возврата |
+| `game/tests/run_red.gd` | Красный путь: грузит заведомо падающий кейс, обязан вернуть код 1 |
+| `game/tests/red_path.gd` | Сам заведомо падающий кейс (в `CASES` обычного раннера не входит) |
 | `game/tests/cases/test_runner.gd` | Самопроверка раннера |
 | `game/sim/scales.gd` | Шум и три состояния тревоги. Плюс часы симуляции |
 | `game/sim/radio.gd` | Эфир: затухание, глушение, отпечаток, перехват |
@@ -173,6 +178,10 @@ git add game/tests/assert.gd game/tests/run.gd game/tests/cases/test_runner.gd
 git commit -m "test: раннер тестов ядра и мини-ассерты"
 ```
 
+> **Правка после ревью (коммиты `1c0c98e`, `697184c`).** Ревью нашло, что раннер не гарантировал вердикт: кейс, падающий в рантайме, давал **ложный зелёный** (код 0), а кейс с синтаксической ошибкой — **зависание** (в обоих случаях `quit()` не вызывался). В `run.gd` добавлены: `can_instantiate()`, `has_method("run")`, проверка типа возврата, сторож в `_process` (превращает аборт `_initialize()` в код 1) и правило **«кейс без единого ассерта — провал»**. Интерфейс `run() -> Array` и явный `CASES` не менялись.
+> **При переносе этой задачи в другой проект код раннера брать из репозитория, а не из сниппета выше** — сниппет оставлен как исходная редакция.
+> Остаточное, вне задач П1: непустой `Dictionary` проходит проверку типа и падает позже на `r["ok"]`.
+
 ---
 
 ### Task 2: Шум и состояния тревоги
@@ -199,7 +208,7 @@ const Scales := preload("res://sim/scales.gd")
 func run() -> Array:
 	var t := Assert.new()
 
-	var s = Scales.new()
+	var s := Scales.new()
 	t.eq("на старте тихо", s.alarm_state(), Scales.Alarm.QUIET)
 
 	s.add_noise(9)
@@ -273,7 +282,7 @@ func tick() -> void:
 
 Сначала добавить в `CASES` в `run.gd` строку `"res://tests/cases/test_scales.gd",`.
 Run: та же команда.
-Expected: `tests: 14, failed: 0`, `код: 0`.
+Expected: `failed: 0`, `код: 0`. Общее число тестов не фиксируем: оно растёт с каждой задачей, а ворота — `failed: 0`.
 
 - [ ] **Step 5: Закоммитить**
 
@@ -310,7 +319,7 @@ func run() -> Array:
 	var t := Assert.new()
 
 	# 1. Две передачи подряд глушат канал.
-	var r = Radio.new()
+	var r := Radio.new()
 	var step := 0
 	r.transmit(step)
 	t.eq("после первой передачи эфир 8", r.radio, 8)
@@ -328,26 +337,32 @@ func run() -> Array:
 	t.is_true("через 8 шагов снова можно говорить", r.can_speak(step))
 
 	# 3. Три передачи с паузами: канал чист, но есть перехват.
-	var r2 = Radio.new()
+	# Смысл проверки — не «успел ли канал восстановиться к концу», а «глушило ли
+	# хоть раз за весь ход». Раньше здесь стояла проверка can_speak в конце, и она
+	# пропускала модель, в которой паузы не помогали вовсе (D34).
+	var r2 := Radio.new()
+	var jammed_ever := false
 	step = 0
 	for i in 3:
-		r2.transmit(step)
+		var res: Dictionary = r2.transmit(step)
+		if bool(res["jammed"]):
+			jammed_ever = true
 		for j in 10:
 			r2.tick_decay(step)
 			step += 1
-	t.is_true("с паузами не заглушили", r2.can_speak(step))
+	t.is_false("с паузами не глушит ни разу", jammed_ever)
 	t.is_true("но три передачи — перехват", r2.is_intercepted())
 
-	# 4. Затухание: −2 за каждые 5 шагов.
-	var r3 = Radio.new()
+	# 4. Затухание: −4 за каждые 5 шагов (D34).
+	var r3 := Radio.new()
 	r3.transmit(0)
 	t.eq("эфир 8", r3.radio, 8)
 	for i in 5:
 		r3.tick_decay(i)
-	t.eq("через 5 шагов эфир 6", r3.radio, 6)
+	t.eq("через 5 шагов эфир 4", r3.radio, 4)
 	for i in 5:
 		r3.tick_decay(i + 5)
-	t.eq("через 10 шагов эфир 4", r3.radio, 4)
+	t.eq("через 10 шагов эфир 0", r3.radio, 0)
 
 	# 5. Отпечаток не затухает.
 	t.eq("отпечаток не смылся", r3.imprint, 1)
@@ -374,7 +389,7 @@ extends RefCounted
 ## Числа — docs/spr/scales.md §3.1.
 
 const PER_TRANSMIT := 8
-const DECAY := 2
+const DECAY := 4
 const DECAY_PERIOD := 5
 const JAM_THRESHOLD := 12
 const JAM_STEPS := 8
@@ -642,7 +657,9 @@ func validate() -> Array:
 	var problems: Array = []
 	if nodes.is_empty():
 		problems.append("нет ни одного помещения")
-	if objective != "" and not nodes.has(objective):
+	if objective == "":
+		problems.append("цель не задана")
+	elif not nodes.has(objective):
 		problems.append("цель ссылается на несуществующее помещение %s" % objective)
 	for e in edges:
 		if not nodes.has(String(e["a"])):
@@ -700,7 +717,7 @@ const Mission := preload("res://sim/mission.gd")
 
 
 static func build():
-	var m = Mission.new()
+	var m := Mission.new()
 	m.id = "small"
 	m.add_node("dock", 1, ["entry"])
 	m.add_node("hall", 1, [])
@@ -760,11 +777,19 @@ func run() -> Array:
 	t.eq("проблема найдена одна", problems.size(), 1)
 	t.is_true("проблема называет помещение", String(problems[0]).contains("nope"))
 
-	var plan = Plan.new()
+	var plan := Plan.new()
 	plan.route = ["dock", "hall", "office2"]
 	t.eq("маршрут непрерывен", m.validate_route(plan.route), [])
 	plan.route = ["dock", "it4"]
 	t.eq("разрыв маршрута пойман", m.validate_route(plan.route).size(), 1)
+
+	# Миссия без цели невалидна: раньше проверка стояла под `objective != ""`
+	# и отсутствие цели не ловилось вовсе.
+	var no_goal = Fixture.build()
+	no_goal.objective = ""
+	var goal_problems: Array = no_goal.validate()
+	t.eq("миссия без цели — одна проблема", goal_problems.size(), 1)
+	t.is_true("проблема называет цель", String(goal_problems[0]).contains("цель"))
 
 	return t.results
 ```
@@ -809,12 +834,12 @@ const Sim := preload("res://sim/sim.gd")
 
 func _make(route: Array):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.exit_backup_node = "hall"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 	return sim
 
@@ -853,7 +878,7 @@ func run() -> Array:
 	var sim4 = _make(["dock", "hall"])
 	sim4.advance()
 	sim4.current_window = {"id": "w1", "kind": "locked_door", "options": []}
-	var before := sim4.scales.step
+	var before: int = sim4.scales.step
 	var ev: Array = sim4.advance()
 	t.eq("мир замер", sim4.scales.step, before)
 	t.eq("событий нет", ev.size(), 0)
@@ -932,7 +957,7 @@ func setup(mission_, plan_, config := {}) -> void:
 
 	var start := String(plan.route[0])
 	for a in plan.agents:
-		var agent = Agent.new()
+		var agent := Agent.new()
 		agent.id = String(a["id"])
 		agent.kind = Agent.Kind.OWN
 		agent.role = String(a.get("role", "tactician"))
@@ -943,7 +968,7 @@ func setup(mission_, plan_, config := {}) -> void:
 		own.append(agent)
 
 	for p in mission.patrols:
-		var guard = Agent.new()
+		var guard := Agent.new()
 		guard.id = String(p["id"])
 		guard.kind = Agent.Kind.GUARD
 		guard.node = String(p["route"][0])
@@ -985,7 +1010,10 @@ func result() -> Dictionary:
 			dead.append(a.id)
 		elif a.state != Agent.State.OK:
 			injured.append(a.id)
-		if a.node == plan.exit_node:
+		# «Вышел» = дошёл до выхода ПОСЛЕ взятой цели. Без второй половины условия
+		# агент, стартующий на выходе (такие маршруты есть в тестах), попадал бы
+		# в escaped с нулевого шага, и проверки в задачах 10–11 были бы пустыми.
+		if objective_done and a.node == plan.exit_node:
 			escaped.append(a.id)
 	return {
 		"outcome": outcome,
@@ -1019,8 +1047,6 @@ func _emit(type: String, data: Dictionary) -> void:
 func _advance_own() -> void:
 	for a in own:
 		if a.is_dead():
-			continue
-		if a.node == plan.exit_node:
 			continue
 		if a.delay > 0:
 			a.delay -= 1
@@ -1092,6 +1118,8 @@ git add game/sim/sim.gd game/sim/response.gd game/tests/cases/test_movement.gd g
 git commit -m "feat(sim): шаг мира — движение по плану, стоимость переходов, автопауза"
 ```
 
+> **Правка после финального ревью ветки.** Найденное: `setup()` не проверял вход, а `no_route` был исходом, которого ничто, кроме пустого маршрута, не порождает. Теперь `setup()` зовёт `mission.validate()` и `mission.validate_route(plan.route)` **до** первого шага и на любой проблеме (включая пустой маршрут и неизвестный ключ `config`) выставляет `finished = true`, `outcome = "invalid_mission"` и публикует событие `invalid_mission` со списком проблем. Исход `no_route` убран как недостижимый: неверный вход не должен притворяться `caught`/`timeout`. Сниппет выше оставлен как исходная редакция.
+
 ### Task 7: Сенсоры и призраки
 
 **Files:**
@@ -1128,11 +1156,11 @@ func _count(sim, type: String) -> int:
 func run() -> Array:
 	var t := Assert.new()
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = ["dock"]
 	p.exit_node = "dock"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 
 	t.eq("охрана стартует в холле", sim.guards[0].node, "hall")
@@ -1223,7 +1251,7 @@ git commit -m "feat(sim): сенсоры и призраки — что видн
 **Interfaces:**
 - Consumes: `Radio`, `Understanding`, `Agent.role`.
 - Produces:
-  - `Window.locked_door(edge_id, agent_id) -> Dictionary`, `Window.SILENCE = "silence"`.
+  - `WindowScript.locked_door(edge_id, agent_id) -> Dictionary`, `WindowScript.SILENCE = "silence"`.
   - `Sim.current_window`, `Sim.order(option_id) -> Dictionary` (`{"accepted": bool, "kind", "reason"?, "effect"?}`), `Sim._compromise(agent)` (понадобится в Task 10).
 
 **Три правила, которые здесь кодируются:**
@@ -1273,16 +1301,16 @@ const Assert := preload("res://tests/assert.gd")
 const Fixture := preload("res://tests/fixtures/small_mission.gd")
 const Plan := preload("res://sim/plan.gd")
 const Sim := preload("res://sim/sim.gd")
-const Window := preload("res://sim/window.gd")
+const WindowScript := preload("res://sim/window.gd")
 
 
-func _make(config := {}, agents := null):
+func _make(config = {}, agents = null):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = ["dock", "hall", "office2", "vault"]
 	p.exit_node = "dock"
 	p.agents = agents if agents != null else [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, config)
 	return sim
 
@@ -1301,8 +1329,8 @@ func run() -> Array:
 	_to_window(sim)
 	t.is_true("окно открыто", sim.current_window != null)
 	t.eq("вид окна", String(sim.current_window["kind"]), "locked_door")
-	t.is_true("у окна всегда есть молчание", Window.has_silence(sim.current_window))
-	var step_before := sim.scales.step
+	t.is_true("у окна всегда есть молчание", WindowScript.has_silence(sim.current_window))
+	var step_before: int = sim.scales.step
 	sim.advance()
 	t.eq("при открытом окне шагов нет", sim.scales.step, step_before)
 
@@ -1330,12 +1358,14 @@ func run() -> Array:
 	t.eq("шум выбитой двери", sim2.scales.noise - noise_before, 8)
 	t.is_false("дверь открыта силой", bool(sim2.mission.edge("e_office_vault")["locked"]))
 
-	# 4. Отказы приходят с причиной.
+	# 4. Отказы приходят с причиной и НЕ закрывают окно: иначе игрок терял бы
+	# решение из-за отказа, а харнесс задачи 11 не смог бы отступить к молчанию.
 	var sim3 = _make({"orders": 0})
 	_to_window(sim3)
 	var no_orders: Dictionary = sim3.order("breach")
 	t.is_false("без приказов отказ", no_orders["accepted"])
 	t.eq("причина названа", String(no_orders["reason"]), "no_orders")
+	t.is_true("окно осталось открытым", sim3.current_window != null)
 
 	var sim4 = _make()
 	_to_window(sim4)
@@ -1343,22 +1373,34 @@ func run() -> Array:
 	var jammed: Dictionary = sim4.order("breach")
 	t.is_false("заглушённому отказ", jammed["accepted"])
 	t.eq("причина названа", String(jammed["reason"]), "jammed")
+	t.is_true("окно осталось открытым", sim4.current_window != null)
 
-	# 5. Молчание со связистом: импровизация, но детерминированная по seed.
+	# 5. Неизвестный вариант отвергается, не тратя приказ. Иначе опечатка в
+	# идентификаторе молча сжигала бы приказ, шумела в эфир и отчитывалась успехом.
+	var sim5 = _make()
+	_to_window(sim5)
+	var unknown: Dictionary = sim5.order("нет_такого_варианта")
+	t.is_false("неизвестный вариант отвергнут", unknown["accepted"])
+	t.eq("причина названа", String(unknown["reason"]), "unknown_option")
+	t.eq("приказ не потрачен", sim5.orders_left, 3)
+	t.eq("эфир молчит", sim5.radio.radio, 0)
+	t.is_true("окно осталось открытым", sim5.current_window != null)
+
+	# 6. Молчание со связистом: импровизация, но детерминированная по seed.
 	var crew := [
 		{"id": "kira", "role": "tactician", "understanding": 3},
 		{"id": "echo", "role": "comms", "understanding": 3},
 	]
-	var a := _make({"seed": 7}, crew)
+	var a = _make({"seed": 7}, crew)
 	_to_window(a)
 	var eff_a: Dictionary = a.order("silence")["effect"]
-	var b := _make({"seed": 7}, crew)
+	var b = _make({"seed": 7}, crew)
 	_to_window(b)
 	var eff_b: Dictionary = b.order("silence")["effect"]
 	t.eq("тот же seed — та же импровизация", eff_a, eff_b)
 	t.is_true("импровизировал связист", String(eff_a["by"]) == "comms")
 
-	# 6. Без связиста молчание всегда безопасно.
+	# 7. Без связиста молчание всегда безопасно.
 	var c = _make({"seed": 7})
 	_to_window(c)
 	var eff_c: Dictionary = c.order("silence")["effect"]
@@ -1377,10 +1419,10 @@ Expected: `LOAD FAIL  res://tests/cases/test_windows.gd`, `код: 1`.
 Добавить константу рядом с остальными `preload`:
 
 ```gdscript
-const Window := preload("res://sim/window.gd")
+const WindowScript := preload("res://sim/window.gd")
 ```
 
-В `advance()` после `_update_visibility()` вставить `_maybe_open_window()`.
+В `advance()` вставить `_maybe_open_window()` **последним** — после `_check_end()`. Порядок именно такой: окно открывается в конце шага, чтобы уже завершённая миссия не оставляла висящее неразрешимое окно. Это подтверждено реализацией задачи 8 и зафиксировано здесь как единственный источник правды.
 
 **И отдельно — движение обязано упираться в запертую дверь.** Без этого агент пройдёт сквозь неё, окно не откроется, и весь Task 8 не имеет смысла. В `_advance_own()` сразу после получения ребра `e` добавить:
 
@@ -1405,7 +1447,7 @@ func _maybe_open_window() -> void:
 		if e.is_empty():
 			continue
 		if bool(e.get("locked", false)) and a.node == String(e["a"]):
-			current_window = Window.locked_door(String(e["id"]), a.id)
+			current_window = WindowScript.locked_door(String(e["id"]), a.id)
 			_emit("window_opened", {"kind": "locked_door", "edge": e["id"], "agent": a.id})
 			return
 
@@ -1415,12 +1457,22 @@ func order(option_id: String) -> Dictionary:
 	if current_window == null:
 		return {"accepted": false, "reason": "no_window"}
 	var w: Dictionary = current_window
-	if option_id == Window.SILENCE:
+	if option_id == WindowScript.SILENCE:
 		var eff := _resolve_silence(w)
 		_apply_silence(w, eff)
 		current_window = null
 		_emit("order_silenced", {"window": w["id"], "effect": eff})
 		return {"accepted": true, "kind": "silence", "effect": eff}
+	# Проверка варианта — ДО списания. Иначе опечатка в идентификаторе сожгла бы
+	# приказ, добавила передачу в эфир и вернула «принято» — а харнесс задачи 11
+	# верит полю accepted и не отступил бы к молчанию.
+	var known := false
+	for o in w["options"]:
+		if String(o["id"]) == option_id:
+			known = true
+	if not known:
+		_emit("order_refused", {"window": w["id"], "reason": "unknown_option"})
+		return {"accepted": false, "reason": "unknown_option"}
 	if orders_left <= 0:
 		_emit("order_refused", {"window": w["id"], "reason": "no_orders"})
 		return {"accepted": false, "reason": "no_orders"}
@@ -1550,11 +1602,11 @@ const Sim := preload("res://sim/sim.gd")
 
 func _make(route: Array):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	# noise_start = 25: тревога взводится на первом же шаге
 	sim.setup(m, p, {"orders": 3, "seed": 1, "noise_start": 25})
 	return sim
@@ -1578,8 +1630,8 @@ func run() -> Array:
 	var t := Assert.new()
 
 	# 1. Тревога взводится сама и блокирует пассажирский лифт.
-	# Маршрут начинается в холле, а выход в доке — поэтому миссия не заканчивается
-	# на первом же шаге и можно наблюдать, как закрываются пути.
+	# Маршрут начинается в холле, а не на выходе: агенту нужно куда-то идти,
+	# чтобы было видно, как тревога перекрывает пути.
 	var rise = _make(["hall"])
 	rise.advance()
 	t.is_true("тревога взведена", rise.response.active)
@@ -1610,6 +1662,17 @@ func run() -> Array:
 	for i in 5:
 		calm.advance()
 	t.eq("до тревоги лифт довёз", calm.own[0].node, "it4")
+
+	# 5. Все погибли — это НЕ успешный уход, даже если цель взята.
+	# Мёртвые пропускаются в проверке «все на выходе», поэтому без счётчика живых
+	# полностью погибшая группа проходила бы как extracted.
+	var lost = _make(["dock"])
+	lost.objective_done = true
+	for i in 3:
+		lost.own[0].add_trigger()
+	lost._check_end()
+	t.is_true("боец мёртв", lost.own[0].is_dead())
+	t.is_false("все погибшие — не extracted", String(lost.result()["outcome"]) == "extracted")
 
 	return t.results
 ```
@@ -1691,17 +1754,23 @@ func edge_blocked(kind: String, step: int) -> bool:
 func _check_end() -> void:
 	if finished:
 		return
-	var all_out := true
-	for a in own:
-		if a.is_dead():
-			continue
-		if a.node != plan.exit_node:
-			all_out = false
-	if all_out:
-		finished = true
-		outcome = "extracted" if objective_done else "aborted"
-		_emit("mission_ended", {"outcome": outcome})
-		return
+	# Уход засчитывается ТОЛЬКО после взятой цели. Иначе агент, стартующий на
+	# выходе (а такие маршруты есть в тестах), завершал бы миссию на первом шаге.
+	# И только если на выходе есть ЖИВОЙ: «все погибли» — это не успешный уход.
+	if objective_done:
+		var alive := 0
+		var all_out := true
+		for a in own:
+			if a.is_dead():
+				continue
+			alive += 1
+			if a.node != plan.exit_node:
+				all_out = false
+		if alive > 0 and all_out:
+			finished = true
+			outcome = "extracted"
+			_emit("mission_ended", {"outcome": outcome})
+			return
 	if response.has_arrived(scales.step):
 		finished = true
 		outcome = "caught"
@@ -1712,6 +1781,8 @@ func _check_end() -> void:
 		outcome = "timeout"
 		_emit("mission_ended", {"outcome": outcome})
 ```
+
+**Почему здесь нет исхода «ушли без данных» (`aborted`).** В П1 ничто его не порождает: отступление как выбор игрока появится в П2 вместе с фазой планирования. Ветка была бы недостижима, а до этой правки — ещё и вредна (см. комментарий в коде). Вернуть её — задача П2.
 
 Заменить заглушку `_check_objective` на:
 
@@ -1725,9 +1796,15 @@ func _check_objective() -> void:
 		if a.node == mission.objective:
 			objective_done = true
 			_emit("objective_reached", {"agent": a.id, "node": a.node})
-			a.waypoints = [a.node, plan.exit_node]
-			a.waypoint_index = 1
-			a.progress = 0
+			# На выход идут ВСЕ живые, а не только тот, кто взял цель. Иначе
+			# группа из двух бойцов никогда не соберётся на выходе, а конец
+			# миссии требует именно всех — и уход не зачтётся никогда.
+			for b in own:
+				if b.is_dead():
+					continue
+				b.waypoints = [b.node, plan.exit_node]
+				b.waypoint_index = 1
+				b.progress = 0
 			return
 ```
 
@@ -1755,7 +1832,7 @@ git commit -m "feat(sim): тревога как перелом, группа р�
 
 **Interfaces:**
 - Consumes: `Sim._compromise(agent)`, `Agent.add_trigger()`.
-- Produces: событие `agent_compromised`; в `result()` — `injured`, `dead`, `escaped`, `cargo`.
+- Produces: событие `agent_compromised`; в `result()` — `injured`, `dead`, `escaped`. Поля `cargo` здесь нет: выбор «копия или оригинал» — это контент миссии (П3), в П1 носить нечего.
 
 **Инвариант, который тест обязан защищать:** **один промах убить не может.** Это не баланс, а обещание игроку (design.md §13.5). Если тест на это когда-нибудь упадёт — сломана не цифра, а обещание.
 
@@ -1774,11 +1851,11 @@ const Agent := preload("res://sim/agent.gd")
 
 func _make(route: Array):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 	return sim
 
@@ -1826,10 +1903,40 @@ func run() -> Array:
 	t.is_true("вышедший в отчёте", out.result()["escaped"].has("kira"))
 
 	# 8. Никто не убит при верном прохождении: инвариант «один промах не убивает».
-	var clean = _make(["dock", "hall", "office2"])
+	# Маршрут идёт через док и подвал, где патруля нет: на этом кейсе проверяется
+	# отсутствие смертей, а не взаимодействие с охраной (оно — в пункте 9).
+	var clean = _make(["dock", "archive0", "dock"])
 	for i in 10:
 		clean.advance()
 	t.eq("никто не погиб на пустой миссии", clean.result()["dead"].size(), 0)
+
+	# 9. Контакт с охраной — один раз на помещение, а не каждый тик.
+	# Иначе три тика в одном коридоре с патрулём убивали бы бойца, и обещание
+	# «смерть — цена серии ошибок» превращалось бы в «цену трёх шагов».
+	var contact = _make(["dock", "hall"])
+	for i in 4:
+		contact.advance()
+	t.eq("контакт ранил", contact.own[0].state, Agent.State.WOUNDED)
+	t.eq("триггер ровно один, хотя охрана возвращалась", contact.own[0].triggers, 1)
+	t.is_false("и это не смерть", contact.own[0].is_dead())
+
+	# 10. Двое в одном помещении с охраной — триггер у КАЖДОГО.
+	# `return` вместо `break` в обходе охраны обрывал бы весь проход по группе, и
+	# все, кто идёт в списке после первого засвеченного, не получали бы триггер
+	# никогда — при том что группа из двух бойцов поддержана и в цели, и в молчании.
+	var duo_mission = Fixture.build()
+	var duo_plan := Plan.new()
+	duo_plan.route = ["dock", "hall"]
+	duo_plan.exit_node = "dock"
+	duo_plan.agents = [
+		{"id": "kira", "role": "tactician", "understanding": 3},
+		{"id": "echo", "role": "comms", "understanding": 3},
+	]
+	var duo := Sim.new()
+	duo.setup(duo_mission, duo_plan, {"orders": 3, "seed": 1})
+	duo.advance()
+	t.eq("первый засвечен", duo.own[0].triggers, 1)
+	t.eq("второй тоже засвечен", duo.own[1].triggers, 1)
 
 	return t.results
 ```
@@ -1840,27 +1947,56 @@ Expected: провал на пункте 4 или 5 — `_compromise` уже е�
 
 - [ ] **Step 3: Дополнить `game/sim/sim.gd` — контакт с охраной**
 
-Добавить в `advance()` после `_update_visibility()`, **до** `_maybe_open_window()`:
+Добавить в `advance()` после `_update_visibility()` (окно вызывается последним, так что контакты оказываются раньше него):
 
 ```gdscript
 	_check_contacts()
 ```
 
-Порядок вызовов в `advance()` должен остаться таким: часы → тревога → движение своих → движение охраны → видимость → контакты → окно → цель → конец миссии.
+Порядок вызовов в `advance()` должен остаться таким: часы → тревога → движение своих → движение охраны → видимость → контакты → цель → конец миссии → окно. Окно последнее намеренно: завершённая миссия не должна оставлять открытое окно, которое уже некому разрешить.
 
-И сам метод:
+И сам метод. **Контакт засчитывается один раз на помещение, а не каждый шаг** — иначе боец, задержавшийся в одном коридоре с патрулём, набирал бы три триггера за три тика и погибал, а обещание «смерть — цена серии ошибок» превращалось бы в «цену трёх шагов». Механика та же, что у контакта сенсора в задаче 7: фронт, а не поток.
+
+Сначала добавить поле рядом с `ghost_reported`:
+
+```gdscript
+## id бойца -> помещение, где его уже засекли. Сбрасывается в setup().
+var compromised_at: Dictionary = {}
+```
+
+и в `setup()`, рядом со сбросом `ghost_reported = {}`, добавить `compromised_at = {}`.
+
+Затем сам метод:
 
 ```gdscript
 ## Охрана и свои в одном помещении — это увидение. Пока в лоб: без проверки
 ## направления взгляда и без «заметил, но не понял» (это П2).
+## Засчитывается один раз на помещение: вернулся в то же помещение — это уже
+## не новое увидение, и триггеры не капают за каждый тик.
 func _check_contacts() -> void:
 	for a in own:
 		if a.is_dead():
 			continue
 		for g in guards:
 			if g.node == a.node:
-				_compromise(a)
-				return
+				if String(compromised_at.get(a.id, "")) != a.node:
+					compromised_at[a.id] = a.node
+					_compromise(a)
+				break   # break, а не return: иначе все, кто идёт в списке после
+				        # первого, не получат триггер даже в том же помещении
+```
+
+И одна правка в `result()`, которую задачи 7–9 не трогали: **мёртвый боец не может быть «вышедшим»**. Сейчас проверка ухода стоит вне ветки смерти, поэтому погибший, оставшийся на узле выхода, попадёт и в `dead`, и в `escaped`. Заменить тело цикла на:
+
+```gdscript
+	for a in own:
+		if a.is_dead():
+			dead.append(a.id)
+			continue
+		if a.state != Agent.State.OK:
+			injured.append(a.id)
+		if objective_done and a.node == plan.exit_node:
+			escaped.append(a.id)
 ```
 
 - [ ] **Step 4: Прогнать — ожидаем зелёный**
@@ -1902,7 +2038,7 @@ const Harness := preload("res://sim/harness.gd")
 
 
 func _plan(route: Array):
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.agents = [
@@ -1914,41 +2050,48 @@ func _plan(route: Array):
 
 func run() -> Array:
 	var t := Assert.new()
-	var m = Fixture.build()
 	var route := ["dock", "hall", "office2", "vault"]
 
+	# ВАЖНО: миссию строим заново на каждый прогон. `_unlock` правит миссию
+	# НА МЕСТЕ, поэтому переиспользованный объект — это уже другой вход: второй
+	# прогон увидел бы дверь открытой, не дошёл бы до окна и получил бы другой исход.
+
 	# 1. Прогон даёт полный отчёт.
-	var r: Dictionary = Harness.run_scenario(m, _plan(route), ["breach"], {"seed": 5})
+	var r: Dictionary = Harness.run_scenario(Fixture.build(), _plan(route), ["breach"], {"seed": 5})
 	for key in ["outcome", "steps", "objective_done", "orders_left", "noise", "radio", "imprint", "alarm", "injured", "dead", "positions", "digest"]:
 		t.is_true("в отчёте есть %s" % key, r.has(key))
 	t.eq("приказ потрачен", r["orders_left"], 2)
-	t.eq("эфир от одного приказа", r["radio"], 8)
+	# Эфир затухает: к концу миссии он успевает остыть. Несмываемое свидетельство
+	# передачи — отпечаток (D33), по нему и сверяем факт передачи.
+	t.eq("передача была одна", r["imprint"], 1)
+	t.is_true("эфир успел остыть", int(r["radio"]) < 8)
 
 	# 2. Детерминизм: тот же вход — тот же отпечаток.
-	var again: Dictionary = Harness.run_scenario(m, _plan(route), ["breach"], {"seed": 5})
+	var again: Dictionary = Harness.run_scenario(Fixture.build(), _plan(route), ["breach"], {"seed": 5})
 	t.eq("повтор совпал", again["digest"], r["digest"])
 
 	# 3. Другой сценарий — другой исход (иначе сценарий ни на что не влияет).
-	var silent: Dictionary = Harness.run_scenario(m, _plan(route), ["silence"], {"seed": 5})
+	var silent: Dictionary = Harness.run_scenario(Fixture.build(), _plan(route), ["silence"], {"seed": 5})
 	t.is_true("молчание отличается от приказа", silent["digest"] != r["digest"])
 	t.eq("молчание не тратит приказы", silent["orders_left"], 3)
 	t.eq("молчание не шумит в эфире", silent["radio"], 0)
+	t.eq("молчание не оставляет отпечатка", silent["imprint"], 0)
 
 	# 4. Короткий сценарий: кончились ответы — дальше игрок молчит.
-	var short: Dictionary = Harness.run_scenario(m, _plan(["dock"]), [], {"seed": 5})
+	var short: Dictionary = Harness.run_scenario(Fixture.build(), _plan(["dock"]), [], {"seed": 5})
 	t.is_true("исход есть", String(short["outcome"]) != "")
 
 	# 5. Тревога и уход из подвала воспроизводятся через харнесс.
 	var run_away: Dictionary = Harness.run_scenario(
-		m, _plan(["dock", "archive0"]), [], {"seed": 5, "noise_start": 25}
+		Fixture.build(), _plan(["dock", "archive0"]), [], {"seed": 5, "noise_start": 25}
 	)
 	t.eq("ушли из подвала", String(run_away["outcome"]), "extracted")
 	t.is_true("цель взята", run_away["objective_done"])
 
 	# 6. Импровизация связиста тоже детерминирована через харнесс.
 	var crew := ["dock", "hall", "office2", "vault"]
-	var i1: Dictionary = Harness.run_scenario(m, _plan(crew), ["silence"], {"seed": 99})
-	var i2: Dictionary = Harness.run_scenario(m, _plan(crew), ["silence"], {"seed": 99})
+	var i1: Dictionary = Harness.run_scenario(Fixture.build(), _plan(crew), ["silence"], {"seed": 99})
+	var i2: Dictionary = Harness.run_scenario(Fixture.build(), _plan(crew), ["silence"], {"seed": 99})
 	t.eq("импровизация воспроизводима", i1["digest"], i2["digest"])
 
 	return t.results
@@ -1972,7 +2115,7 @@ const Sim := preload("res://sim/sim.gd")
 
 
 static func run_scenario(mission, plan, script: Array = [], config := {}) -> Dictionary:
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(mission, plan, config)
 	var index := 0
 	var guard := 0
@@ -2036,7 +2179,8 @@ git commit -m "feat(sim): харнесс прогонов и проверка д
 
 - **Покрытие документа.** Шум и тревога — Task 2, эфир — Task 3, Понимание — Task 4, вертикаль и стоимость переходов — Task 6, сенсоры и призраки — Task 7, окна и молчание — Task 8, тревога как перелом и группа реагирования — Task 9, ранения и обещание «один промах не убивает» — Task 10, харнесс и детерминизм — Task 11. Числа взяты из `spr/scales.md`, а не придуманы.
 - **Что не покрыто и почему.** Цена специалистов и экономика миссии не проверяются кодом П1 — они лежат в данных (`spr/mercs.md`) и станут проверяемыми только с контент-конвейером. Доля вмешательства (цель 30–40 %) требует прогонов на реальной миссии, то есть после П3.
-- **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `Window.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/perimeter_closed/edge_blocked`, `Harness.run_scenario/digest` — используются во всех задачах одинаково.
-- **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, окно, конец. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве — `mission.edge(id)["locked"] = false` меняет миссию, и это намеренно.
+- **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `WindowScript.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/edge_blocked`, `Harness.run_scenario/digest` — используются всеми задачами одинаково.
+  **Кроме них объявлены, но потребителя в П1 не имеют:** `Response.perimeter_closed` (периметр — ступень П2, D35) и `Understanding.resolves_literally` вместе с полем `complexity` в вариантах окна (буквальность — про наёмных специалистов, они в П2, D36). Эти два имени **не** «используются во всех задачах»: у них есть объявление, тест на саму функцию и запись в журнале решений с условием возврата. Раньше строка утверждала равномерность использования для всего списка — это было неверно.
+- **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, цель, конец миссии, окно — окно последнее, и при `finished` оно не открывается вовсе. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве: **писать в него нельзя.** Открытая дверь живёт в `Sim.unlocked`, потому что миссия — неизменяемые данные, а один и тот же объект миссии обязан давать один и тот же исход при повторном прогоне (D7).
 
 
