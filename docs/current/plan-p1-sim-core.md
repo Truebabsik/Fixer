@@ -1007,7 +1007,10 @@ func result() -> Dictionary:
 			dead.append(a.id)
 		elif a.state != Agent.State.OK:
 			injured.append(a.id)
-		if a.node == plan.exit_node:
+		# «Вышел» = дошёл до выхода ПОСЛЕ взятой цели. Без второй половины условия
+		# агент, стартующий на выходе (такие маршруты есть в тестах), попадал бы
+		# в escaped с нулевого шага, и проверки в задачах 10–11 были бы пустыми.
+		if objective_done and a.node == plan.exit_node:
 			escaped.append(a.id)
 	return {
 		"outcome": outcome,
