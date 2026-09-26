@@ -17,6 +17,7 @@ const CASES := [
 	"res://tests/cases/test_visibility.gd",
 	"res://tests/cases/test_windows.gd",
 	"res://tests/cases/test_response.gd",
+	"res://tests/cases/test_casualties.gd",
 ]
 
 ## Типы, которые run() не имеет права вернуть. Сравниваем с typeof() вручную,

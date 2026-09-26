@@ -103,6 +103,7 @@ func advance() -> Array:
 	_advance_own()
 	_advance_guards()
 	_update_visibility()
+	_check_contacts()
 	_check_objective()
 	_check_end()
 	_maybe_open_window()
@@ -116,11 +117,13 @@ func result() -> Dictionary:
 	for a in own:
 		if a.is_dead():
 			dead.append(a.id)
-		elif a.state != Agent.State.OK:
+			continue
+		if a.state != Agent.State.OK:
 			injured.append(a.id)
 		# «Вышел» = дошёл до выхода ПОСЛЕ взятой цели. Без второй половины условия
 		# агент, стартующий на выходе (такие маршруты есть в тестах), попадал бы
 		# в escaped с нулевого шага, и проверки в задачах 10–11 были бы пустыми.
+		# Погибший до этой строки не доходит: труп не зачитывается как уход.
 		if objective_done and a.node == plan.exit_node:
 			escaped.append(a.id)
 	return {
@@ -221,6 +224,18 @@ func _update_visibility() -> void:
 		if ghost != g.node and not bool(ghost_reported.get(g.id, false)):
 			ghost_reported[g.id] = true
 			_emit("ghost_mismatch", {"agent": g.id, "ghost": ghost, "real": g.node})
+
+
+## Охрана и свои в одном помещении — это увидение. Пока в лоб: без проверки
+## направления взгляда и без «заметил, но не понял» (это П2).
+func _check_contacts() -> void:
+	for a in own:
+		if a.is_dead():
+			continue
+		for g in guards:
+			if g.node == a.node:
+				_compromise(a)
+				return
 
 
 func _check_objective() -> void:
