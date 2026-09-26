@@ -10,6 +10,7 @@ extends SceneTree
 const CASES := [
 	"res://tests/cases/test_runner.gd",
 	"res://tests/cases/test_scales.gd",
+	"res://tests/cases/test_radio.gd",
 ]
 
 ## Типы, которые run() не имеет права вернуть. Сравниваем с typeof() вручную,
