@@ -23,7 +23,11 @@ func run() -> Array:
 	var t := Assert.new()
 
 	# 1. Лестница: hall -> office2 стоит 3 шага.
+	# Патруль уводим: кейс про цену перехода. С Task 10 контакт с охраной ранит
+	# бойца в холле, добавляет 5 шума и +1 шаг к следующему переходу — цена
+	# перехода перестала бы быть измеримой. Контакты проверяет test_casualties.gd.
 	var sim = _make(["dock", "hall", "office2"])
+	sim.guards = []
 	sim.advance()
 	t.eq("один шаг — один тик часов", sim.scales.step, 1)
 	t.eq("переход в холл — 1 шаг", sim.own[0].node, "hall")
@@ -34,8 +38,9 @@ func run() -> Array:
 	t.eq("лестница — 3 шага", sim.own[0].node, "office2")
 	t.eq("шум лестницы нулевой", sim.scales.noise, 0)
 
-	# 2. Лифт: hall -> it4 стоит 2 шага и 4 шума.
+	# 2. Лифт: hall -> it4 стоит 2 шага и 4 шума. Охрану уводим — см. пункт 1.
 	var sim2 = _make(["dock", "hall", "it4"])
+	sim2.guards = []
 	for i in 5:
 		sim2.advance()
 	t.eq("лифт довёз", sim2.own[0].node, "it4")
