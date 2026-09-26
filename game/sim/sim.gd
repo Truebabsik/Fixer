@@ -97,6 +97,9 @@ func advance() -> Array:
 		return []
 	scales.tick()
 	radio.tick_decay(scales.step - 1)
+	if scales.alarm_state() == Scales.Alarm.ALARM and not response.active:
+		response.engage(scales.step)
+		_emit("alarm_raised", {"step": scales.step})
 	_advance_own()
 	_advance_guards()
 	_update_visibility()
@@ -167,7 +170,7 @@ func _advance_own() -> void:
 			continue
 		if bool(e.get("locked", false)):
 			continue                  # упёрлись в запертую дверь: её откроет окно
-		if response.edge_blocked(String(e["kind"]), scales.step):
+		if a.progress == 0 and response.edge_blocked(String(e["kind"]), scales.step):
 			_emit("path_blocked", {"agent": a.id, "edge": e["id"], "kind": e["kind"]})
 			continue
 		a.progress += 1
@@ -221,11 +224,52 @@ func _update_visibility() -> void:
 
 
 func _check_objective() -> void:
-	pass
+	if objective_done:
+		return
+	for a in own:
+		if a.is_dead():
+			continue
+		if a.node == mission.objective:
+			objective_done = true
+			_emit("objective_reached", {"agent": a.id, "node": a.node})
+			# На выход идут ВСЕ живые, а не только тот, кто взял цель. Иначе
+			# группа из двух бойцов никогда не соберётся на выходе, а конец
+			# миссии требует именно всех — и уход не зачтётся никогда.
+			for b in own:
+				if b.is_dead():
+					continue
+				b.waypoints = [b.node, plan.exit_node]
+				b.waypoint_index = 1
+				b.progress = 0
+			return
 
 
 func _check_end() -> void:
-	pass
+	if finished:
+		return
+	# Уход засчитывается ТОЛЬКО после взятой цели. Иначе агент, стартующий на
+	# выходе (а такие маршруты есть в тестах), завершал бы миссию на первом шаге.
+	if objective_done:
+		var all_out := true
+		for a in own:
+			if a.is_dead():
+				continue
+			if a.node != plan.exit_node:
+				all_out = false
+		if all_out:
+			finished = true
+			outcome = "extracted"
+			_emit("mission_ended", {"outcome": outcome})
+			return
+	if response.has_arrived(scales.step):
+		finished = true
+		outcome = "caught"
+		_emit("mission_ended", {"outcome": outcome})
+		return
+	if scales.step >= MAX_STEPS:
+		finished = true
+		outcome = "timeout"
+		_emit("mission_ended", {"outcome": outcome})
 
 
 ## Окно открывается, когда план упёрся в запертую дверь.
