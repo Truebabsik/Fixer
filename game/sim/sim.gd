@@ -26,6 +26,8 @@ var events: Array = []
 var ghost_positions: Dictionary = {}
 var visible_last: Dictionary = {}
 var ghost_reported: Dictionary = {}
+## id бойца -> помещение, где его уже засекли. Сбрасывается в setup().
+var compromised_at: Dictionary = {}
 var orders_left: int = 3
 var rng := RandomNumberGenerator.new()
 var current_window = null
@@ -48,6 +50,7 @@ func setup(mission_, plan_, config := {}) -> void:
 	ghost_positions = {}
 	visible_last = {}
 	ghost_reported = {}
+	compromised_at = {}
 	current_window = null
 	objective_done = false
 	finished = false
@@ -228,13 +231,17 @@ func _update_visibility() -> void:
 
 ## Охрана и свои в одном помещении — это увидение. Пока в лоб: без проверки
 ## направления взгляда и без «заметил, но не понял» (это П2).
+## Засчитывается один раз на помещение: вернулся в то же помещение — это уже
+## не новое увидение, и триггеры не капают за каждый тик.
 func _check_contacts() -> void:
 	for a in own:
 		if a.is_dead():
 			continue
 		for g in guards:
 			if g.node == a.node:
-				_compromise(a)
+				if String(compromised_at.get(a.id, "")) != a.node:
+					compromised_at[a.id] = a.node
+					_compromise(a)
 				return
 
 
