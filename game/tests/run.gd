@@ -41,6 +41,12 @@ func _initialize() -> void:
 			print("LOAD FAIL  %s" % path)
 			failed += 1
 			continue
+		## Кейс, не предъявивший ни одного ассерта, — провал: пустой Array от
+		## абортированной run() неотличим от честного «ноль ассертов».
+		if results.size() == 0:
+			print("LOAD FAIL  %s: кейс не предъявил ни одного ассерта" % path)
+			failed += 1
+			continue
 		for r in results:
 			total += 1
 			if not bool(r["ok"]):
