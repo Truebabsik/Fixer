@@ -242,7 +242,8 @@ func _check_contacts() -> void:
 				if String(compromised_at.get(a.id, "")) != a.node:
 					compromised_at[a.id] = a.node
 					_compromise(a)
-				return
+				break   # break, а не return: иначе все, кто идёт в списке после
+				        # первого, не получат триггер даже в том же помещении
 
 
 func _check_objective() -> void:

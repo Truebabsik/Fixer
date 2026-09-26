@@ -89,4 +89,22 @@ func run() -> Array:
 	t.is_true("погибший в отчёте", crep["dead"].has("kira"))
 	t.eq("погибший не в ушедших", crep["escaped"].size(), 0)
 
+	# 11. Двое в одном помещении с охраной — триггер у КАЖДОГО.
+	# `return` вместо `break` в обходе охраны обрывал бы весь проход по группе, и
+	# все, кто идёт в списке после первого засвеченного, не получали бы триггер
+	# никогда — при том что группа из двух бойцов поддержана и в цели, и в молчании.
+	var duo_mission = Fixture.build()
+	var duo_plan := Plan.new()
+	duo_plan.route = ["dock", "hall"]
+	duo_plan.exit_node = "dock"
+	duo_plan.agents = [
+		{"id": "kira", "role": "tactician", "understanding": 3},
+		{"id": "echo", "role": "comms", "understanding": 3},
+	]
+	var duo := Sim.new()
+	duo.setup(duo_mission, duo_plan, {"orders": 3, "seed": 1})
+	duo.advance()
+	t.eq("первый засвечен", duo.own[0].triggers, 1)
+	t.eq("второй тоже засвечен", duo.own[1].triggers, 1)
+
 	return t.results
