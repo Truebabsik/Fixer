@@ -70,4 +70,15 @@ func run() -> Array:
 		calm.advance()
 	t.eq("до тревоги лифт довёз", calm.own[0].node, "it4")
 
+	# 5. Все погибли — это НЕ успешный уход, даже если цель взята.
+	# Мёртвые пропускаются в проверке «все на выходе», поэтому без счётчика живых
+	# полностью погибшая группа проходила бы как extracted.
+	var lost = _make(["dock"])
+	lost.objective_done = true
+	for i in 3:
+		lost.own[0].add_trigger()
+	lost._check_end()
+	t.is_true("боец мёртв", lost.own[0].is_dead())
+	t.is_false("все погибшие — не extracted", String(lost.result()["outcome"]) == "extracted")
+
 	return t.results
