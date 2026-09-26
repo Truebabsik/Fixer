@@ -831,12 +831,12 @@ const Sim := preload("res://sim/sim.gd")
 
 func _make(route: Array):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.exit_backup_node = "hall"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 	return sim
 
@@ -954,7 +954,7 @@ func setup(mission_, plan_, config := {}) -> void:
 
 	var start := String(plan.route[0])
 	for a in plan.agents:
-		var agent = Agent.new()
+		var agent := Agent.new()
 		agent.id = String(a["id"])
 		agent.kind = Agent.Kind.OWN
 		agent.role = String(a.get("role", "tactician"))
@@ -965,7 +965,7 @@ func setup(mission_, plan_, config := {}) -> void:
 		own.append(agent)
 
 	for p in mission.patrols:
-		var guard = Agent.new()
+		var guard := Agent.new()
 		guard.id = String(p["id"])
 		guard.kind = Agent.Kind.GUARD
 		guard.node = String(p["route"][0])
@@ -1150,11 +1150,11 @@ func _count(sim, type: String) -> int:
 func run() -> Array:
 	var t := Assert.new()
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = ["dock"]
 	p.exit_node = "dock"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 
 	t.eq("охрана стартует в холле", sim.guards[0].node, "hall")
@@ -1300,11 +1300,11 @@ const Window := preload("res://sim/window.gd")
 
 func _make(config := {}, agents := null):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = ["dock", "hall", "office2", "vault"]
 	p.exit_node = "dock"
 	p.agents = agents if agents != null else [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, config)
 	return sim
 
@@ -1572,11 +1572,11 @@ const Sim := preload("res://sim/sim.gd")
 
 func _make(route: Array):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	# noise_start = 25: тревога взводится на первом же шаге
 	sim.setup(m, p, {"orders": 3, "seed": 1, "noise_start": 25})
 	return sim
@@ -1796,11 +1796,11 @@ const Agent := preload("res://sim/agent.gd")
 
 func _make(route: Array):
 	var m = Fixture.build()
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 	return sim
 
@@ -1924,7 +1924,7 @@ const Harness := preload("res://sim/harness.gd")
 
 
 func _plan(route: Array):
-	var p = Plan.new()
+	var p := Plan.new()
 	p.route = route
 	p.exit_node = "dock"
 	p.agents = [
@@ -1994,7 +1994,7 @@ const Sim := preload("res://sim/sim.gd")
 
 
 static func run_scenario(mission, plan, script: Array = [], config := {}) -> Dictionary:
-	var sim = Sim.new()
+	var sim := Sim.new()
 	sim.setup(mission, plan, config)
 	var index := 0
 	var guard := 0
