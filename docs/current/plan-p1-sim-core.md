@@ -1753,9 +1753,15 @@ func _check_objective() -> void:
 		if a.node == mission.objective:
 			objective_done = true
 			_emit("objective_reached", {"agent": a.id, "node": a.node})
-			a.waypoints = [a.node, plan.exit_node]
-			a.waypoint_index = 1
-			a.progress = 0
+			# На выход идут ВСЕ живые, а не только тот, кто взял цель. Иначе
+			# группа из двух бойцов никогда не соберётся на выходе, а конец
+			# миссии требует именно всех — и уход не зачтётся никогда.
+			for b in own:
+				if b.is_dead():
+					continue
+				b.waypoints = [b.node, plan.exit_node]
+				b.waypoint_index = 1
+				b.progress = 0
 			return
 ```
 
@@ -1889,6 +1895,19 @@ func _check_contacts() -> void:
 			if g.node == a.node:
 				_compromise(a)
 				return
+```
+
+И одна правка в `result()`, которую задачи 7–9 не трогали: **мёртвый боец не может быть «вышедшим»**. Сейчас проверка ухода стоит вне ветки смерти, поэтому погибший, оставшийся на узле выхода, попадёт и в `dead`, и в `escaped`. Заменить тело цикла на:
+
+```gdscript
+	for a in own:
+		if a.is_dead():
+			dead.append(a.id)
+			continue
+		if a.state != Agent.State.OK:
+			injured.append(a.id)
+		if objective_done and a.node == plan.exit_node:
+			escaped.append(a.id)
 ```
 
 - [ ] **Step 4: Прогнать — ожидаем зелёный**
