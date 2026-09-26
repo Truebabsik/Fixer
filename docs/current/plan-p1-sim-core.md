@@ -20,6 +20,7 @@
 - **Числа берутся дословно** из `docs/spr/scales.md`. Не подбирать «на глаз» в коде.
 - **Отступы — табы** (конвенция Godot). Идентификаторы английские, комментарии и имена тестов русские.
 - **Объекты из `preload`-скриптов создавать через `:=`:** `var s := Scales.new()`. С обычным `=` переменная выходит **нетипизированной**, и любой последующий `var x := s.field` не компилируется (`Cannot infer the type`). По той же причине **никогда не применять `:=` к члену переменной, объявленной через `=`** — в тестах, где объект приходит из функции без аннотации (`var sim = _make(...)`), писать явный тип: `var before: int = sim.scales.step`.
+- **Исключение из этого правила — объекты из функций без аннотации возврата** (такова фикстура: `static func build()` без `-> ...`). Там `:=` не выведет тип вовсе, а если аннотировать возврат как `RefCounted`, перестанет компилироваться доступ к членам. Поэтому для фикстуры и подобных ей фабрик **остаётся `=` и динамический доступ**. Правило про `:=` — про объекты, создаваемые напрямую из `preload`-константы (`Scales.new()`, `Plan.new()`).
 - **Все команды выполнять из `F:\WORK\Fixer`.**
 
 ---
@@ -653,7 +654,9 @@ func validate() -> Array:
 	var problems: Array = []
 	if nodes.is_empty():
 		problems.append("нет ни одного помещения")
-	if objective != "" and not nodes.has(objective):
+	if objective == "":
+		problems.append("цель не задана")
+	elif not nodes.has(objective):
 		problems.append("цель ссылается на несуществующее помещение %s" % objective)
 	for e in edges:
 		if not nodes.has(String(e["a"])):
@@ -711,7 +714,7 @@ const Mission := preload("res://sim/mission.gd")
 
 
 static func build():
-	var m = Mission.new()
+	var m := Mission.new()
 	m.id = "small"
 	m.add_node("dock", 1, ["entry"])
 	m.add_node("hall", 1, [])
@@ -771,11 +774,19 @@ func run() -> Array:
 	t.eq("проблема найдена одна", problems.size(), 1)
 	t.is_true("проблема называет помещение", String(problems[0]).contains("nope"))
 
-	var plan = Plan.new()
+	var plan := Plan.new()
 	plan.route = ["dock", "hall", "office2"]
 	t.eq("маршрут непрерывен", m.validate_route(plan.route), [])
 	plan.route = ["dock", "it4"]
 	t.eq("разрыв маршрута пойман", m.validate_route(plan.route).size(), 1)
+
+	# Миссия без цели невалидна: раньше проверка стояла под `objective != ""`
+	# и отсутствие цели не ловилось вовсе.
+	var no_goal = Fixture.build()
+	no_goal.objective = ""
+	var goal_problems: Array = no_goal.validate()
+	t.eq("миссия без цели — одна проблема", goal_problems.size(), 1)
+	t.is_true("проблема называет цель", String(goal_problems[0]).contains("цель"))
 
 	return t.results
 ```
