@@ -31,10 +31,18 @@ func run() -> Array:
 	t.eq("проблема найдена одна", problems.size(), 1)
 	t.is_true("проблема называет помещение", String(problems[0]).contains("nope"))
 
-	var plan = Plan.new()
+	var plan := Plan.new()
 	plan.route = ["dock", "hall", "office2"]
 	t.eq("маршрут непрерывен", m.validate_route(plan.route), [])
 	plan.route = ["dock", "it4"]
 	t.eq("разрыв маршрута пойман", m.validate_route(plan.route).size(), 1)
+
+	# Миссия без цели невалидна: раньше проверка стояла под `objective != ""`
+	# и отсутствие цели не ловилось вовсе.
+	var no_goal = Fixture.build()
+	no_goal.objective = ""
+	var goal_problems: Array = no_goal.validate()
+	t.eq("миссия без цели — одна проблема", goal_problems.size(), 1)
+	t.is_true("проблема называет цель", String(goal_problems[0]).contains("цель"))
 
 	return t.results

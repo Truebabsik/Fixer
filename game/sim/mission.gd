@@ -63,7 +63,9 @@ func validate() -> Array:
 	var problems: Array = []
 	if nodes.is_empty():
 		problems.append("нет ни одного помещения")
-	if objective != "" and not nodes.has(objective):
+	if objective == "":
+		problems.append("цель не задана")
+	elif not nodes.has(objective):
 		problems.append("цель ссылается на несуществующее помещение %s" % objective)
 	for e in edges:
 		if not nodes.has(String(e["a"])):

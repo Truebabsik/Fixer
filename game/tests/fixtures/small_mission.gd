@@ -6,7 +6,7 @@ const Mission := preload("res://sim/mission.gd")
 
 
 static func build():
-	var m = Mission.new()
+	var m := Mission.new()
 	m.id = "small"
 	m.add_node("dock", 1, ["entry"])
 	m.add_node("hall", 1, [])
