@@ -1354,12 +1354,14 @@ func run() -> Array:
 	t.eq("шум выбитой двери", sim2.scales.noise - noise_before, 8)
 	t.is_false("дверь открыта силой", bool(sim2.mission.edge("e_office_vault")["locked"]))
 
-	# 4. Отказы приходят с причиной.
+	# 4. Отказы приходят с причиной и НЕ закрывают окно: иначе игрок терял бы
+	# решение из-за отказа, а харнесс задачи 11 не смог бы отступить к молчанию.
 	var sim3 = _make({"orders": 0})
 	_to_window(sim3)
 	var no_orders: Dictionary = sim3.order("breach")
 	t.is_false("без приказов отказ", no_orders["accepted"])
 	t.eq("причина названа", String(no_orders["reason"]), "no_orders")
+	t.is_true("окно осталось открытым", sim3.current_window != null)
 
 	var sim4 = _make()
 	_to_window(sim4)
@@ -1367,8 +1369,20 @@ func run() -> Array:
 	var jammed: Dictionary = sim4.order("breach")
 	t.is_false("заглушённому отказ", jammed["accepted"])
 	t.eq("причина названа", String(jammed["reason"]), "jammed")
+	t.is_true("окно осталось открытым", sim4.current_window != null)
 
-	# 5. Молчание со связистом: импровизация, но детерминированная по seed.
+	# 5. Неизвестный вариант отвергается, не тратя приказ. Иначе опечатка в
+	# идентификаторе молча сжигала бы приказ, шумела в эфир и отчитывалась успехом.
+	var sim5 = _make()
+	_to_window(sim5)
+	var unknown: Dictionary = sim5.order("нет_такого_варианта")
+	t.is_false("неизвестный вариант отвергнут", unknown["accepted"])
+	t.eq("причина названа", String(unknown["reason"]), "unknown_option")
+	t.eq("приказ не потрачен", sim5.orders_left, 3)
+	t.eq("эфир молчит", sim5.radio.radio, 0)
+	t.is_true("окно осталось открытым", sim5.current_window != null)
+
+	# 6. Молчание со связистом: импровизация, но детерминированная по seed.
 	var crew := [
 		{"id": "kira", "role": "tactician", "understanding": 3},
 		{"id": "echo", "role": "comms", "understanding": 3},
@@ -1382,7 +1396,7 @@ func run() -> Array:
 	t.eq("тот же seed — та же импровизация", eff_a, eff_b)
 	t.is_true("импровизировал связист", String(eff_a["by"]) == "comms")
 
-	# 6. Без связиста молчание всегда безопасно.
+	# 7. Без связиста молчание всегда безопасно.
 	var c = _make({"seed": 7})
 	_to_window(c)
 	var eff_c: Dictionary = c.order("silence")["effect"]
@@ -1404,7 +1418,7 @@ Expected: `LOAD FAIL  res://tests/cases/test_windows.gd`, `код: 1`.
 const WindowScript := preload("res://sim/window.gd")
 ```
 
-В `advance()` после `_update_visibility()` вставить `_maybe_open_window()`.
+В `advance()` вставить `_maybe_open_window()` **последним** — после `_check_end()`. Порядок именно такой: окно открывается в конце шага, чтобы уже завершённая миссия не оставляла висящее неразрешимое окно. Это подтверждено реализацией задачи 8 и зафиксировано здесь как единственный источник правды.
 
 **И отдельно — движение обязано упираться в запертую дверь.** Без этого агент пройдёт сквозь неё, окно не откроется, и весь Task 8 не имеет смысла. В `_advance_own()` сразу после получения ребра `e` добавить:
 
@@ -1445,6 +1459,16 @@ func order(option_id: String) -> Dictionary:
 		current_window = null
 		_emit("order_silenced", {"window": w["id"], "effect": eff})
 		return {"accepted": true, "kind": "silence", "effect": eff}
+	# Проверка варианта — ДО списания. Иначе опечатка в идентификаторе сожгла бы
+	# приказ, добавила передачу в эфир и вернула «принято» — а харнесс задачи 11
+	# верит полю accepted и не отступил бы к молчанию.
+	var known := false
+	for o in w["options"]:
+		if String(o["id"]) == option_id:
+			known = true
+	if not known:
+		_emit("order_refused", {"window": w["id"], "reason": "unknown_option"})
+		return {"accepted": false, "reason": "unknown_option"}
 	if orders_left <= 0:
 		_emit("order_refused", {"window": w["id"], "reason": "no_orders"})
 		return {"accepted": false, "reason": "no_orders"}
@@ -1875,13 +1899,13 @@ Expected: провал на пункте 4 или 5 — `_compromise` уже е�
 
 - [ ] **Step 3: Дополнить `game/sim/sim.gd` — контакт с охраной**
 
-Добавить в `advance()` после `_update_visibility()`, **до** `_maybe_open_window()`:
+Добавить в `advance()` после `_update_visibility()` (окно вызывается последним, так что контакты оказываются раньше него):
 
 ```gdscript
 	_check_contacts()
 ```
 
-Порядок вызовов в `advance()` должен остаться таким: часы → тревога → движение своих → движение охраны → видимость → контакты → окно → цель → конец миссии.
+Порядок вызовов в `advance()` должен остаться таким: часы → тревога → движение своих → движение охраны → видимость → контакты → цель → конец миссии → окно. Окно последнее намеренно: завершённая миссия не должна оставлять открытое окно, которое уже некому разрешить.
 
 И сам метод:
 
@@ -2085,6 +2109,6 @@ git commit -m "feat(sim): харнесс прогонов и проверка д
 - **Покрытие документа.** Шум и тревога — Task 2, эфир — Task 3, Понимание — Task 4, вертикаль и стоимость переходов — Task 6, сенсоры и призраки — Task 7, окна и молчание — Task 8, тревога как перелом и группа реагирования — Task 9, ранения и обещание «один промах не убивает» — Task 10, харнесс и детерминизм — Task 11. Числа взяты из `spr/scales.md`, а не придуманы.
 - **Что не покрыто и почему.** Цена специалистов и экономика миссии не проверяются кодом П1 — они лежат в данных (`spr/mercs.md`) и станут проверяемыми только с контент-конвейером. Доля вмешательства (цель 30–40 %) требует прогонов на реальной миссии, то есть после П3.
 - **Имена и типы.** `Sim.setup/advance/order/result`, `Agent.add_trigger/speed_penalty/is_dead/is_own`, `Mission.edge/edges_at/edge_between/other_end/validate/validate_route`, `Plan.route/exit_node/exit_backup_node/agents`, `WindowScript.SILENCE/has_silence/locked_door`, `Radio.transmit/tick_decay/can_speak/is_intercepted`, `Response.engage/steps_since/has_arrived/perimeter_closed/edge_blocked`, `Harness.run_scenario/digest` — используются во всех задачах одинаково.
-- **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, окно, конец. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве — `mission.edge(id)["locked"] = false` меняет миссию, и это намеренно.
+- **Места, где легко ошибиться.** (1) Порядок в `advance()`: часы, тревога, движение, контакты, видимость, цель, конец миссии, окно — окно последнее. (2) Проверка блокировки только при `progress == 0`. (3) `edge()` возвращает ссылку на словарь в массиве — `mission.edge(id)["locked"] = false` меняет миссию, и это намеренно.
 
 
