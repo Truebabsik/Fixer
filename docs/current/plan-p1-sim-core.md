@@ -1741,14 +1741,17 @@ func _check_end() -> void:
 		return
 	# Уход засчитывается ТОЛЬКО после взятой цели. Иначе агент, стартующий на
 	# выходе (а такие маршруты есть в тестах), завершал бы миссию на первом шаге.
+	# И только если на выходе есть ЖИВОЙ: «все погибли» — это не успешный уход.
 	if objective_done:
+		var alive := 0
 		var all_out := true
 		for a in own:
 			if a.is_dead():
 				continue
+			alive += 1
 			if a.node != plan.exit_node:
 				all_out = false
-		if all_out:
+		if alive > 0 and all_out:
 			finished = true
 			outcome = "extracted"
 			_emit("mission_ended", {"outcome": outcome})
