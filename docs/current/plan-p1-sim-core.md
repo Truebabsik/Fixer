@@ -19,6 +19,7 @@
 - **Вердикт — код возврата процесса.** `quit(0)` = зелёно, `quit(1)` = провал. Наличие текста в stderr — **не** признак провала: Godot пишет туда безобидный шум (`Failed to read the root certificate store`, `Cannot save file editor_settings`) даже при коде 0.
 - **Числа берутся дословно** из `docs/spr/scales.md`. Не подбирать «на глаз» в коде.
 - **Отступы — табы** (конвенция Godot). Идентификаторы английские, комментарии и имена тестов русские.
+- **Объекты из `preload`-скриптов создавать через `:=`:** `var s := Scales.new()`. С обычным `=` переменная выходит **нетипизированной**, и любой последующий `var x := s.field` не компилируется (`Cannot infer the type`). По той же причине **никогда не применять `:=` к члену переменной, объявленной через `=`** — в тестах, где объект приходит из функции без аннотации (`var sim = _make(...)`), писать явный тип: `var before: int = sim.scales.step`.
 - **Все команды выполнять из `F:\WORK\Fixer`.**
 
 ---
@@ -203,7 +204,7 @@ const Scales := preload("res://sim/scales.gd")
 func run() -> Array:
 	var t := Assert.new()
 
-	var s = Scales.new()
+	var s := Scales.new()
 	t.eq("на старте тихо", s.alarm_state(), Scales.Alarm.QUIET)
 
 	s.add_noise(9)
@@ -857,7 +858,7 @@ func run() -> Array:
 	var sim4 = _make(["dock", "hall"])
 	sim4.advance()
 	sim4.current_window = {"id": "w1", "kind": "locked_door", "options": []}
-	var before := sim4.scales.step
+	var before: int = sim4.scales.step
 	var ev: Array = sim4.advance()
 	t.eq("мир замер", sim4.scales.step, before)
 	t.eq("событий нет", ev.size(), 0)
@@ -1306,7 +1307,7 @@ func run() -> Array:
 	t.is_true("окно открыто", sim.current_window != null)
 	t.eq("вид окна", String(sim.current_window["kind"]), "locked_door")
 	t.is_true("у окна всегда есть молчание", Window.has_silence(sim.current_window))
-	var step_before := sim.scales.step
+	var step_before: int = sim.scales.step
 	sim.advance()
 	t.eq("при открытом окне шагов нет", sim.scales.step, step_before)
 
