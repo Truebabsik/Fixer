@@ -273,7 +273,7 @@ func tick() -> void:
 
 Сначала добавить в `CASES` в `run.gd` строку `"res://tests/cases/test_scales.gd",`.
 Run: та же команда.
-Expected: `tests: 14, failed: 0`, `код: 0`.
+Expected: `failed: 0`, `код: 0`. Общее число тестов не фиксируем: оно растёт с каждой задачей, а ворота — `failed: 0`.
 
 - [ ] **Step 5: Закоммитить**
 
