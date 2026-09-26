@@ -1300,7 +1300,7 @@ const Sim := preload("res://sim/sim.gd")
 const WindowScript := preload("res://sim/window.gd")
 
 
-func _make(config := {}, agents := null):
+func _make(config = {}, agents = null):
 	var m = Fixture.build()
 	var p := Plan.new()
 	p.route = ["dock", "hall", "office2", "vault"]
@@ -1387,10 +1387,10 @@ func run() -> Array:
 		{"id": "kira", "role": "tactician", "understanding": 3},
 		{"id": "echo", "role": "comms", "understanding": 3},
 	]
-	var a := _make({"seed": 7}, crew)
+	var a = _make({"seed": 7}, crew)
 	_to_window(a)
 	var eff_a: Dictionary = a.order("silence")["effect"]
-	var b := _make({"seed": 7}, crew)
+	var b = _make({"seed": 7}, crew)
 	_to_window(b)
 	var eff_b: Dictionary = b.order("silence")["effect"]
 	t.eq("тот же seed — та же импровизация", eff_a, eff_b)
