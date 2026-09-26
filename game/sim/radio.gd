@@ -9,7 +9,7 @@ extends RefCounted
 ## Числа — docs/spr/scales.md §3.1.
 
 const PER_TRANSMIT := 8
-const DECAY := 2
+const DECAY := 4
 const DECAY_PERIOD := 5
 const JAM_THRESHOLD := 12
 const JAM_STEPS := 8

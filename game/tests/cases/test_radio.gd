@@ -28,26 +28,32 @@ func run() -> Array:
 	t.is_true("через 8 шагов снова можно говорить", r.can_speak(step))
 
 	# 3. Три передачи с паузами: канал чист, но есть перехват.
+	# Смысл проверки — не «успел ли канал восстановиться к концу», а «глушило ли
+	# хоть раз за весь ход». Раньше здесь стояла проверка can_speak в конце, и она
+	# пропускала модель, в которой паузы не помогали вовсе (D34).
 	var r2 := Radio.new()
+	var jammed_ever := false
 	step = 0
 	for i in 3:
-		r2.transmit(step)
+		var res: Dictionary = r2.transmit(step)
+		if bool(res["jammed"]):
+			jammed_ever = true
 		for j in 10:
 			r2.tick_decay(step)
 			step += 1
-	t.is_true("с паузами не заглушили", r2.can_speak(step))
+	t.is_false("с паузами не глушит ни разу", jammed_ever)
 	t.is_true("но три передачи — перехват", r2.is_intercepted())
 
-	# 4. Затухание: −2 за каждые 5 шагов.
+	# 4. Затухание: −4 за каждые 5 шагов (D34).
 	var r3 := Radio.new()
 	r3.transmit(0)
 	t.eq("эфир 8", r3.radio, 8)
 	for i in 5:
 		r3.tick_decay(i)
-	t.eq("через 5 шагов эфир 6", r3.radio, 6)
+	t.eq("через 5 шагов эфир 4", r3.radio, 4)
 	for i in 5:
 		r3.tick_decay(i + 5)
-	t.eq("через 10 шагов эфир 4", r3.radio, 4)
+	t.eq("через 10 шагов эфир 0", r3.radio, 0)
 
 	# 5. Отпечаток не затухает.
 	t.eq("отпечаток не смылся", r3.imprint, 1)
