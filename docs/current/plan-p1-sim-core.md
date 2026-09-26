@@ -1828,7 +1828,7 @@ git commit -m "feat(sim): тревога как перелом, группа р�
 
 **Interfaces:**
 - Consumes: `Sim._compromise(agent)`, `Agent.add_trigger()`.
-- Produces: событие `agent_compromised`; в `result()` — `injured`, `dead`, `escaped`, `cargo`.
+- Produces: событие `agent_compromised`; в `result()` — `injured`, `dead`, `escaped`. Поля `cargo` здесь нет: выбор «копия или оригинал» — это контент миссии (П3), в П1 носить нечего.
 
 **Инвариант, который тест обязан защищать:** **один промах убить не может.** Это не баланс, а обещание игроку (design.md §13.5). Если тест на это когда-нибудь упадёт — сломана не цифра, а обещание.
 
@@ -1916,6 +1916,24 @@ func run() -> Array:
 	t.eq("триггер ровно один, хотя охрана возвращалась", contact.own[0].triggers, 1)
 	t.is_false("и это не смерть", contact.own[0].is_dead())
 
+	# 10. Двое в одном помещении с охраной — триггер у КАЖДОГО.
+	# `return` вместо `break` в обходе охраны обрывал бы весь проход по группе, и
+	# все, кто идёт в списке после первого засвеченного, не получали бы триггер
+	# никогда — при том что группа из двух бойцов поддержана и в цели, и в молчании.
+	var duo_mission = Fixture.build()
+	var duo_plan := Plan.new()
+	duo_plan.route = ["dock", "hall"]
+	duo_plan.exit_node = "dock"
+	duo_plan.agents = [
+		{"id": "kira", "role": "tactician", "understanding": 3},
+		{"id": "echo", "role": "comms", "understanding": 3},
+	]
+	var duo := Sim.new()
+	duo.setup(duo_mission, duo_plan, {"orders": 3, "seed": 1})
+	duo.advance()
+	t.eq("первый засвечен", duo.own[0].triggers, 1)
+	t.eq("второй тоже засвечен", duo.own[1].triggers, 1)
+
 	return t.results
 ```
 
@@ -1960,7 +1978,8 @@ func _check_contacts() -> void:
 				if String(compromised_at.get(a.id, "")) != a.node:
 					compromised_at[a.id] = a.node
 					_compromise(a)
-				return
+				break   # break, а не return: иначе все, кто идёт в списке после
+				        # первого, не получат триггер даже в том же помещении
 ```
 
 И одна правка в `result()`, которую задачи 7–9 не трогали: **мёртвый боец не может быть «вышедшим»**. Сейчас проверка ухода стоит вне ветки смерти, поэтому погибший, оставшийся на узле выхода, попадёт и в `dead`, и в `escaped`. Заменить тело цикла на:
