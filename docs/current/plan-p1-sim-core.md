@@ -1042,8 +1042,6 @@ func _advance_own() -> void:
 	for a in own:
 		if a.is_dead():
 			continue
-		if a.node == plan.exit_node:
-			continue
 		if a.delay > 0:
 			a.delay -= 1
 			continue
@@ -1600,8 +1598,8 @@ func run() -> Array:
 	var t := Assert.new()
 
 	# 1. Тревога взводится сама и блокирует пассажирский лифт.
-	# Маршрут начинается в холле, а выход в доке — поэтому миссия не заканчивается
-	# на первом же шаге и можно наблюдать, как закрываются пути.
+	# Маршрут начинается в холле, а не на выходе: агенту нужно куда-то идти,
+	# чтобы было видно, как тревога перекрывает пути.
 	var rise = _make(["hall"])
 	rise.advance()
 	t.is_true("тревога взведена", rise.response.active)
@@ -1713,17 +1711,20 @@ func edge_blocked(kind: String, step: int) -> bool:
 func _check_end() -> void:
 	if finished:
 		return
-	var all_out := true
-	for a in own:
-		if a.is_dead():
-			continue
-		if a.node != plan.exit_node:
-			all_out = false
-	if all_out:
-		finished = true
-		outcome = "extracted" if objective_done else "aborted"
-		_emit("mission_ended", {"outcome": outcome})
-		return
+	# Уход засчитывается ТОЛЬКО после взятой цели. Иначе агент, стартующий на
+	# выходе (а такие маршруты есть в тестах), завершал бы миссию на первом шаге.
+	if objective_done:
+		var all_out := true
+		for a in own:
+			if a.is_dead():
+				continue
+			if a.node != plan.exit_node:
+				all_out = false
+		if all_out:
+			finished = true
+			outcome = "extracted"
+			_emit("mission_ended", {"outcome": outcome})
+			return
 	if response.has_arrived(scales.step):
 		finished = true
 		outcome = "caught"
@@ -1734,6 +1735,8 @@ func _check_end() -> void:
 		outcome = "timeout"
 		_emit("mission_ended", {"outcome": outcome})
 ```
+
+**Почему здесь нет исхода «ушли без данных» (`aborted`).** В П1 ничто его не порождает: отступление как выбор игрока появится в П2 вместе с фазой планирования. Ветка была бы недостижима, а до этой правки — ещё и вредна (см. комментарий в коде). Вернуть её — задача П2.
 
 Заменить заглушку `_check_objective` на:
 
