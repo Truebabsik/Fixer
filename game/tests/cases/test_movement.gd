@@ -70,4 +70,22 @@ func run() -> Array:
 	sim5.advance()
 	t.eq("через период охрана ушла на второй узел", sim5.guards[0].node, "office2")
 
+	# 6. Штраф скорости по состояниям: OK — 0, WOUNDED — +1, CRITICAL — +2.
+	# CRITICAL не был закреплён ничем: `speed_penalty` мог вернуть 1, и все
+	# проверки набора оставались зелёными.
+	var pen = _make(["dock", "hall"])
+	var own_agent = pen.own[0]
+	t.eq("здоровый идёт без штрафа", own_agent.speed_penalty(), 0)
+	own_agent.add_trigger()
+	t.eq("раненый: штраф +1", own_agent.speed_penalty(), 1)
+	own_agent.add_trigger()
+	t.eq("тяжёлый: штраф +2", own_agent.speed_penalty(), 2)
+	# И это видно в шагах: переход dock -> hall стоит 1 + 2 = 3 шага.
+	pen.advance()
+	t.eq("тяжёлый не прошёл и половины", pen.own[0].node, "dock")
+	pen.advance()
+	t.eq("тяжёлый всё ещё идёт", pen.own[0].node, "dock")
+	pen.advance()
+	t.eq("тяжёлый дошёл за три шага вместо одного", pen.own[0].node, "hall")
+
 	return t.results
