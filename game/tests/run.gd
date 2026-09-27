@@ -1,72 +1,23 @@
 extends SceneTree
-## Раннер ядра. Вердикт — код возврата процесса: 0 зелёный, 1 есть провалы.
-## Список кейсов явный: никакого сканирования каталогов, порядок фиксирован,
-## поэтому прогон воспроизводим.
+## Раннер ядра. Вердикт — код возврата процесса: 0 зелёный, 1 провал, 2 приговор сломан.
+## Список кейсов и правила их приёма — в tests/suite.gd, приговор — в tests/verdict.gd.
+## Оба раннера (этот и run_red.gd) пользуются ими, поэтому «зелёный» и «красный» пути
+## не могут разойтись в трактовке.
 ##
 ## Сторож вердикта: GDScript при рантайм-сбое прерывает _initialize() (а не процесс),
 ## поэтому без сторожа прогон может закончиться нулём или повиснуть. Сторож превращает
 ## «аборт до вердикта» в код 1 и гарантирует завершение.
 
-const CASES := [
-	"res://tests/cases/test_runner.gd",
-	"res://tests/cases/test_scales.gd",
-	"res://tests/cases/test_radio.gd",
-	"res://tests/cases/test_understanding.gd",
-	"res://tests/cases/test_mission.gd",
-	"res://tests/cases/test_movement.gd",
-	"res://tests/cases/test_visibility.gd",
-	"res://tests/cases/test_windows.gd",
-	"res://tests/cases/test_response.gd",
-	"res://tests/cases/test_casualties.gd",
-	"res://tests/cases/test_harness.gd",
-]
-
-## Типы, которые run() не имеет права вернуть. Сравниваем с typeof() вручную,
-## чтобы не тянуть в тесты глобальные имена движка.
-const FAILED_TYPES := [TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_OBJECT]
+const Suite := preload("res://tests/suite.gd")
+const Verdict := preload("res://tests/verdict.gd")
 
 var _verdict_reached := false
 
 
 func _initialize() -> void:
-	var total := 0
-	var failed := 0
-	for path in CASES:
-		var case_script: GDScript = load(path)
-		if case_script == null:
-			print("LOAD FAIL  %s" % path)
-			failed += 1
-			continue
-		if not case_script.can_instantiate():
-			print("LOAD FAIL  %s" % path)
-			failed += 1
-			continue
-		var case_obj = case_script.new()
-		if not case_obj.has_method("run"):
-			print("LOAD FAIL  %s" % path)
-			failed += 1
-			continue
-		var results = case_obj.run()
-		if typeof(results) in FAILED_TYPES:
-			print("LOAD FAIL  %s" % path)
-			failed += 1
-			continue
-		## Кейс, не предъявивший ни одного ассерта, — провал: пустой Array от
-		## абортированной run() неотличим от честного «ноль ассертов».
-		if results.size() == 0:
-			print("LOAD FAIL  %s: кейс не предъявил ни одного ассерта" % path)
-			failed += 1
-			continue
-		for r in results:
-			total += 1
-			if not bool(r["ok"]):
-				failed += 1
-				print("FAIL  %s :: %s" % [path.get_file(), str(r["name"])])
-				print("      ожидалось: %s" % str(r["expected"]))
-				print("      получено:  %s" % str(r["actual"]))
-	print("tests: %d, failed: %d" % [total, failed])
+	var verdict := Suite.run(Suite.CASES, false, Verdict.EXIT_FAILED)
 	_verdict_reached = true
-	quit(1 if failed > 0 else 0)
+	quit(int(verdict["exit_code"]))
 
 
 ## Сторож: если _initialize() прервался до вердикта, quit() не вызван и процесс
