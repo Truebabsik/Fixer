@@ -1,0 +1,646 @@
+﻿=== задача 6: эквивалентность трёх путей. База: 857d47c ===
+
+ AGENTS.md                                          |  57 +-
+ docs/agents/brief-template.md                      |  63 ++
+ docs/agents/constraints.md                         |  88 +++
+ docs/agents/report-contract.md                     |  72 +++
+ docs/agents/review-checklist.md                    | 116 ++++
+ docs/current/2026-09-27-content-pipeline/README.md |  40 ++
+ .../briefs/fix-brief-contract-half.md              |  93 +++
+ .../briefs/fix-brief-final-review.md               | 151 +++++
+ .../briefs/fix-brief-message-assertions.md         |  88 +++
+ .../briefs/fix-brief-review-1.md                   | 189 ++++++
+ .../briefs/fix-brief-review-2.md                   | 144 +++++
+ .../briefs/fix-brief-texts-and-agents.md           |  97 +++
+ .../briefs/fix-brief-texts-type-and-agents.md      |  94 +++
+ .../briefs/preflight-brief.md                      |  90 +++
+ .../briefs/task-4-brief.md                         |  83 +++
+ .../briefs/task-5-brief.md                         | 119 ++++
+ .../briefs/task-6-brief.md                         | 105 ++++
+ .../design.md}                                     |   0
+ docs/current/2026-09-27-content-pipeline/ledger.md | 597 ++++++++++++++++++
+ .../plan.md}                                       |   0
+ .../reports/fix-report-contract-half.md            | 391 ++++++++++++
+ .../reports/fix-report-final-review.md             | 327 ++++++++++
+ .../reports/fix-report-message-assertions.md       | 422 +++++++++++++
+ .../reports/fix-report-review-1.md                 | 370 ++++++++++++
+ .../reports/fix-report-review-2.md                 | 664 +++++++++++++++++++++
+ .../reports/fix-report-texts-and-agents.md         | 608 +++++++++++++++++++
+ .../fix-report-texts-type-and-agent-dups.md        | 557 +++++++++++++++++
+ .../reports/preflight-report.md                    | 313 ++++++++++
+ .../reports/task-4-report.md                       | 299 ++++++++++
+ .../reports/task-5-report.md                       | 483 +++++++++++++++
+ .../reports/task-6-report.md                       | 393 ++++++++++++
+ .../review-brief.md}                               |   0
+ .../summary.md}                                    |   0
+ game/tests/suite.gd                                |   1 +
+ 34 files changed, 7100 insertions(+), 14 deletions(-)
+
+diff --git a/game/tests/suite.gd b/game/tests/suite.gd
+index 0cb9660..fb9793c 100644
+--- a/game/tests/suite.gd
++++ b/game/tests/suite.gd
+@@ -11,16 +11,17 @@ const VERDICT := preload("res://tests/verdict.gd")
+ ## Список кейсов явный: никакого сканирования каталогов, порядок фиксирован,
+ ## поэтому прогон воспроизводим.
+ const CASES := [
+ 	"res://tests/cases/test_runner.gd",
+ 	"res://tests/cases/test_verdict.gd",
+ 	"res://tests/cases/test_content_problems.gd",
+ 	"res://tests/cases/test_content_validator.gd",
+ 	"res://tests/cases/test_content_loader.gd",
++	"res://tests/cases/test_three_paths.gd",
+ 	"res://tests/cases/test_handoff_skeleton.gd",
+ 	"res://tests/cases/test_scales.gd",
+ 	"res://tests/cases/test_radio.gd",
+ 	"res://tests/cases/test_understanding.gd",
+ 	"res://tests/cases/test_mission.gd",
+ 	"res://tests/cases/test_movement.gd",
+ 	"res://tests/cases/test_visibility.gd",
+ 	"res://tests/cases/test_windows.gd",
+
+=== НОВЫЙ ФАЙЛ (untracked, в diff не попадает) ===
+extends RefCounted
+## ТРИ ПУТИ К ОДНОЙ МИССИИ — доказательство эквивалентности.
+##
+## Задача этапа: одна миссия, полученная тремя способами, обязана дать ОДНО И ТО ЖЕ
+## в четырёх представлениях. Расхождение путей молча — подтверждённый дважды дефект
+## (ревью первой волны: доказывалось наличие эталонных узлов, но не отсутствие лишних;
+## ревью задачи 4: `data` не сравнивалась вовсе), поэтому здесь сверяются:
+##
+##   1. МОДЕЛЬ      — все поля `Mission`: id, objective, помещения с этажом и тегами,
+##                    рёбра со всеми семью полями, патрули, сенсоры;
+##   2. `data`      — разделы контента: windows, intel, access_points, texts, title_key.
+##                    Это ОТДЕЛЬНОЕ представление: отпечаток прогона может совпасть при
+##                    расхождении `data` и наоборот, поэтому сверка нужна и по нему;
+##   3. ПЛАН        — вторая половина третьей точки входа: `load_mission` (миссия) ПЛЮС
+##                    `load_plan` (маршрут, выходы, груз, состав). У плана нет валидатора,
+##                    поэтому его поведение (явный `[]`, дубли `id`, мусор в поле) надо
+##                    проверять отдельно и на всех путях;
+##   4. ОТПЕЧАТОК   — `Harness.digest` одного и того же прогона (тот же сценарий приказов,
+##                    тот же seed).
+##
+## Пути:
+##   КОД     — `tests/fixtures/small_mission.gd`: граф собран вызовами `add_*`;
+##   СЛОВАРЬ — `content/loader.gd:load_mission(canonical, texts)`;
+##   JSON    — `content/loader.gd:load_text(JSON.stringify(canonical), texts)`.
+##
+## Тексты передаются словарём на ВСЕХ трёх путях, иначе сверка ключей не идёт вовсе
+## (`null` — «сверку не делаю») и доказательство про тексты пустое.
+##
+## Сравниваются И МНОЖЕСТВА, И РАЗМЕРЫ, и каждое поле по отдельности. «Все эталонные
+## узлы на месте» недостаточно: лишний узел с ребром проходил такой набор незамеченным
+## (ревью первой волны). Отсюда `_nodes_of` / `_edges_of` / `_patrols_of` / `_sensors_of` —
+## пары «путь=значение» по каждому помещению и каждому ребру: лишняя запись меняет и
+## размер, и содержимое пары, и провал называет поле, а не «модели не равны».
+
+const Assert := preload("res://tests/assert.gd")
+const Loader := preload("res://content/loader.gd")
+const Fixture := preload("res://tests/fixtures/small_mission.gd")
+const Plan := preload("res://sim/plan.gd")
+const Harness := preload("res://sim/harness.gd")
+
+
+## Канон — единственный источник значений в этом кейсе. Граф и разделы контента повторяют
+## `tests/fixtures/small_mission.gd` (числа шагов подобраны под перекос уровня: из подвала
+## уйти можно, с 4-го этажа — нет).
+##
+## `windows` здесь РУКОПИСНЫЕ, и это не дублирование ради дублирования, а условие
+## невырожденности кейса, найденное ПРОБОЙ. Пока канон брал `Fixture.WINDOWS`, содержимое
+## `data` на пути «код» и на пути «словарь» приходило из ОДНОЙ константы — сравнение не
+## могло покраснеть от правки фикстуры: `"neutral": delay 3 → 4` в `small_mission.gd`
+## оставляло набор зелёным. Теперь записи независимы, и расхождение путей видно.
+## Цена названа прямо: правка окон в фикстуре требует такой же правки здесь — и провал
+## называет поле, а не «модели не равны».
+##
+## Разделы `intel` и `access_points` НЕ пустые намеренно. Пустой раздел проходит сравнение
+## «в обе стороны» независимо от того, кладёт ли загрузчик раздел в модель вообще:
+## доказательство было бы вырожденным ровно на тех двух разделах, которые в прошлый раз
+## не сравнивались. `ap.…` — тексты к точке доступа, тоже непустые.
+##
+## Копии (`duplicate(true)`) обязательны на каждом обращении: `load_mission` не мутирует
+## вход (это проверено), но кейс не должен разделять состояние между кругами и пробами.
+func _canonical() -> Dictionary:
+	return {
+		"id": "small",
+		"title_key": "mission.small.title",
+		"nodes": {
+			"dock": {"floor": 1, "tags": ["entry"]},
+			"hall": {"floor": 1, "tags": []},
+			"office2": {"floor": 2, "tags": []},
+			"vault": {"floor": 2, "tags": ["locked_room"]},
+			"it4": {"floor": 4, "tags": []},
+			"archive0": {"floor": 0, "tags": ["cold_archive"]},
+		},
+		"edges": [
+			{"id": "e_dock_hall", "a": "dock", "b": "hall", "kind": "corridor", "steps": 1, "noise": 0},
+			{"id": "e_hall_office", "a": "hall", "b": "office2", "kind": "stairs", "steps": 3, "noise": 0},
+			{"id": "e_office_it", "a": "office2", "b": "it4", "kind": "stairs", "steps": 12, "noise": 0},
+			{"id": "e_office_vault", "a": "office2", "b": "vault", "kind": "door", "steps": 1, "noise": 8,
+				"locked": true},
+			{"id": "e_hall_lift", "a": "hall", "b": "it4", "kind": "lift_main", "steps": 2, "noise": 4},
+			{"id": "e_dock_freight", "a": "dock", "b": "archive0", "kind": "lift_freight", "steps": 3, "noise": 4},
+			{"id": "e_hall_archive", "a": "hall", "b": "archive0", "kind": "stairs", "steps": 3, "noise": 0},
+		],
+		"patrols": [{"id": "guard_1", "route": ["hall", "office2"], "period": 2}],
+		"sensors": [
+			{"id": "s_hall", "nodes": ["hall"]},
+			{"id": "s_it", "nodes": ["it4"]},
+		],
+		"objective": "archive0",
+		"windows": [{
+			"id": "w_locked_door",
+			"kind": "locked_edge",
+			"trigger": {"type": "locked_edge", "edge": "e_office_vault"},
+			"text_key": "window.w_locked_door.text",
+			"options": [
+				{"id": "breach", "text_key": "window.w_locked_door.breach", "complexity": 1,
+					"cost": {"noise": 8, "delay": 0},
+					"effects": [{"type": "unlock", "edge": "e_office_vault"}]},
+				{"id": "pick", "text_key": "window.w_locked_door.pick", "complexity": 2,
+					"cost": {"noise": 1, "delay": 2},
+					"effects": [{"type": "unlock", "edge": "e_office_vault"}]},
+			],
+			"silence": {
+				"text_key": "window.w_locked_door.silence",
+				"good": [{"type": "unlock", "edge": "e_office_vault"}],
+				"neutral": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_office_vault"}],
+				"bad": [{"type": "delay", "value": 3}, {"type": "noise", "value": 5},
+					{"type": "unlock", "edge": "e_office_vault"}],
+				"safe": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_office_vault"}],
+			},
+		}],
+		"intel": [{
+			"channel": "hack",
+			"observed_at": 0,
+			"entries": [{"kind": "sensor", "nodes": ["hall"], "age_hours": 8, "false": false}],
+		}],
+		"access_points": [{"id": "ap_hall", "node": "hall", "kind": "terminal",
+			"text_key": "ap.ap_hall.text",
+			"actions": [{"id": "copy", "text_key": "ap.ap_hall.copy", "complexity": 1,
+				"cost": {"steps": 4}, "effects": [{"type": "noop"}]}]}],
+	}
+
+
+## Тексты — ВСЕ ключи канона и только они. Собираются обходом данных по полям `*_key`
+## (`title_key` тоже оканчивается на `_key`, поэтому попадает сюда сам): набор не
+## разойдётся с каноном, если в нём появится новое окно или действие.
+##
+## Почему не руками: рукописный список ключей пришлось бы править при каждой правке
+## канона, и провал случался бы на `MISSING_TEXT` — то есть на текстах, а не на том,
+## что забыли. Здесь же проверяется ровно то, что заявлено: тексты есть под все ключи,
+## и лишних ключей нет (висячий ключ даёт `DANGLING_TEXT` и красный прогон).
+func _canonical_texts(data) -> Dictionary:
+	var out: Dictionary = {}
+	_collect_keys(data, out)
+	return out
+
+
+func _collect_keys(value, out: Dictionary) -> void:
+	if typeof(value) == TYPE_DICTIONARY:
+		for key in value:
+			if String(key).ends_with("_key") and typeof(value[key]) == TYPE_STRING:
+				out[String(value[key])] = "ТЕКСТ"
+			else:
+				_collect_keys(value[key], out)
+	elif typeof(value) == TYPE_ARRAY:
+		for item in (value as Array):
+			_collect_keys(item, out)
+
+
+# --- пары «путь=значение»: сравнение со всеми полями и без зависимости от порядка ------
+
+func _nodes_of(m) -> Array:
+	var ids: Array = []
+	for node_id in m.nodes:
+		ids.append(String(node_id))
+	ids.sort()
+	var out: Array = []
+	for node_id in ids:
+		out.append("%s|floor=%s|tags=%s" % [node_id, str(m.nodes[node_id]["floor"]),
+			str(m.nodes[node_id]["tags"])])
+	return out
+
+
+func _edges_of(m) -> Array:
+	var out: Array = []
+	for i in m.edges.size():
+		var e: Dictionary = m.edges[i]
+		out.append("%d|id=%s|a=%s|b=%s|kind=%s|steps=%s|noise=%s|locked=%s" % [i,
+			str(e["id"]), str(e["a"]), str(e["b"]), str(e["kind"]), str(e["steps"]),
+			str(e["noise"]), str(e["locked"])])
+	return out
+
+
+func _patrols_of(m) -> Array:
+	var out: Array = []
+	for i in m.patrols.size():
+		var p: Dictionary = m.patrols[i]
+		out.append("%d|id=%s|route=%s|period=%s" % [i, str(p["id"]), str(p["route"]), str(p["period"])])
+	return out
+
+
+func _sensors_of(m) -> Array:
+	var out: Array = []
+	for i in m.sensors.size():
+		var s: Dictionary = m.sensors[i]
+		out.append("%d|id=%s|nodes=%s" % [i, str(s["id"]), str(s["nodes"])])
+	return out
+
+
+func _plan_of(p) -> Array:
+	var out: Array = ["route=%s" % str(p.route), "exit_node=%s" % str(p.exit_node),
+		"exit_backup_node=%s" % str(p.exit_backup_node), "cargo_heavy=%s" % str(p.cargo_heavy)]
+	for i in p.agents.size():
+		var a: Dictionary = p.agents[i]
+		out.append("agent[%d]|id=%s|role=%s|understanding=%s" % [i, str(a.get("id", "")),
+			str(a.get("role", "")), str(a.get("understanding", "—"))])
+	return out
+
+
+## Сравнение моделей по частям с ИМЕНОВАННЫМИ ассертами: провал называет представление
+## (помещения, рёбра, …), а не «модели не равны». Обе стороны — `Array` пар строк, поэтому
+## `Assert.eq` сравнивает их строго, без неявного равенства контейнеров.
+func _compare_models(t, what: String, a, b) -> void:
+	t.eq("%s: помещений столько же" % what, a.nodes.size(), b.nodes.size())
+	t.eq("%s: рёбер столько же" % what, a.edges.size(), b.edges.size())
+	t.eq("%s: патрулей столько же" % what, a.patrols.size(), b.patrols.size())
+	t.eq("%s: сенсоров столько же" % what, a.sensors.size(), b.sensors.size())
+	t.eq("%s: id миссии" % what, a.id, b.id)
+	t.eq("%s: цель" % what, a.objective, b.objective)
+	t.eq("%s: помещения целиком" % what, _nodes_of(a), _nodes_of(b))
+	t.eq("%s: рёбра целиком" % what, _edges_of(a), _edges_of(b))
+	t.eq("%s: патрули целиком" % what, _patrols_of(a), _patrols_of(b))
+	t.eq("%s: сенсоры целиком" % what, _sensors_of(a), _sensors_of(b))
+
+
+## Канонический вид раздела контента — для сравнения `data` JSON-пути с остальными.
+##
+## Зачем он нужен. `data` — АВТОРСКАЯ форма и кладётся в модель КАК ЕСТЬ (`_deep` копия,
+## без приведения типов): JSON приносит числа float (`1.0`), а словарь и фикстура — int
+## (`1`). Для словарей Godot `1 == 1.0` ЛОЖНО, поэтому строгое сравнение ругалось бы на
+## форму записи, а не на расхождение путей. Тип чисел МОДЕЛИ (`steps`, `floor`, `period`)
+## проверяется отдельно и строго (`typeof(...) == TYPE_INT`) — это и есть обещание
+## контракта; в `data` числа остаются такими, какими их дал формат.
+##
+## Что при этом НЕ теряется: сравнение идёт по ЗНАЧЕНИЮ. Целое и равное ему дробное дают
+## одну запись (`1.0` → `число:1`), а РАЗНЫЕ значения — разные (`1` против `2`; `1.5`
+## против `2`). Дробное показано как есть, а не срезано приведением к int. Сведение
+## целого и равного ему дробного — ЕДИНСТВЕННОЕ послабление канонического вида, и оно
+## названо здесь прямо: это форма записи формата, а не значение данных.
+func _canonical_form(value) -> Array:
+	if typeof(value) == TYPE_DICTIONARY:
+		var keys: Array = []
+		for key in value:
+			keys.append(String(key))
+		keys.sort()
+		var out: Array = []
+		for key in keys:
+			out.append("%s=%s" % [key, _canonical_text(_canonical_form(value[key]))])
+		return out
+	if typeof(value) == TYPE_ARRAY:
+		var items: Array = []
+		for item in (value as Array):
+			items.append(_canonical_text(_canonical_form(item)))
+		return ["[%s]" % ",".join(items)]
+	return _leaf_form(value)
+
+
+## Лист значения. Ветвь числа отдельная: целое и равное ему дробное — одна запись.
+func _leaf_form(value) -> Array:
+	if typeof(value) == TYPE_FLOAT:
+		if is_equal_approx(value, floor(value)):
+			return ["число:%d" % int(value)]
+		return ["число:%s" % str(value)]
+	if typeof(value) == TYPE_INT:
+		return ["число:%d" % value]
+	if typeof(value) == TYPE_STRING:
+		return ["строка:%s" % value]
+	if typeof(value) == TYPE_BOOL:
+		return ["логическое:%s" % str(value)]
+	return ["ничто:%s" % str(value)]
+
+
+## Строка канонического вида — форма для ЧТЕНИЯ провала: сравниваются те же данные,
+## но одним элементом списка, иначе вложенные массивы в отчёте нечитаемы.
+func _canonical_text(form: Array) -> String:
+	return "[%s]" % ", ".join(form)
+
+
+func _payload_of(data) -> Array:
+	var sections: Array = []
+	for key in data:
+		sections.append(String(key))
+	sections.sort()
+	var out: Array = []
+	for section in sections:
+		out.append("%s|%s" % [section, _canonical_text(_canonical_form(data[section]))])
+	return out
+
+
+## Сравнение разделов контента — по каждому разделу отдельно, с размером и значением.
+## Разделы перечислены явно: новый раздел в `Mission.DATA_SECTIONS`, забытый здесь,
+## не провалит сравнение молча — его поймает «разделов столько же» и положительные
+## контроли ниже.
+##
+## `json_side` — из-за формы записи чисел в `data` (см. `_canonical_form`): у JSON-пути
+## значения сравниваются в каноническом виде, у словаря и фикстуры — строго, как есть.
+func _compare_payload(t, what: String, a, b, json_side := false) -> void:
+	t.eq("%s: разделов столько же" % what, a.size(), b.size())
+	var keys_a: Array = []
+	for key in a:
+		keys_a.append(String(key))
+	keys_a.sort()
+	var keys_b: Array = []
+	for key in b:
+		keys_b.append(String(key))
+	keys_b.sort()
+	t.eq("%s: множества разделов" % what, keys_a, keys_b)
+	for section in ["windows", "intel", "access_points", "texts", "title_key"]:
+		t.is_true("%s: раздел %s есть" % [what, section], a.has(section) and b.has(section))
+		if not (a.has(section) and b.has(section)):
+			continue
+		if typeof(a[section]) == TYPE_ARRAY:
+			t.eq("%s: %s — размер" % [what, section], (a[section] as Array).size(),
+				(b[section] as Array).size())
+		if json_side:
+			t.eq("%s: %s — значение" % [what, section], _canonical_form(a[section]),
+				_canonical_form(b[section]))
+		else:
+			t.eq("%s: %s — значение" % [what, section], a[section], b[section])
+
+
+func run() -> Array:
+	var t := Assert.new()
+
+	# --- 0. Канон и его тексты. Всё остальное в кейсе считается от них. ---------------
+	var texts := _canonical_texts(_canonical())
+	t.is_true("канон: тексты непусты (иначе сверка ключей была бы пустой)", texts.size() > 0)
+	# Ключи `*_key` канона лежат и вне окон, поэтому «тексты непусты» — не только про окна.
+	t.is_true("канон: title_key попал в тексты", texts.has("mission.small.title"))
+	t.is_true("канон: текст точки доступа попал в тексты", texts.has("ap.ap_hall.text"))
+	t.is_true("канон: текст действия точки доступа попал в тексты", texts.has("ap.ap_hall.copy"))
+
+	# --- 1. ПУТЬ «СЛОВАРЬ» -----------------------------------------------------------
+	var dict_res := Loader.load_mission(_canonical(), texts)
+	t.is_true("словарь: проблем нет", (dict_res["problems"] as Array).is_empty())
+	t.is_true("словарь: миссия собрана", dict_res["mission"] != null)
+	if dict_res["mission"] == null:
+		return t.results
+	var by_dict = dict_res["mission"]
+
+	# --- 2. ПУТЬ «JSON»: текст собран ИЗ СЛОВАРЯ (не из руки) -------------------------
+	# Сборка из словаря, а не рукописная строка: так проверяется и потеря полей при
+	# сериализации, и float/int после разбора. Рукописный JSON проверял бы только
+	# разбор, не сверяя два пути между собой.
+	#
+	# Текст собирается ОДИН раз и тем же значением идёт в `load_text`: вторая сборка
+	# `JSON.stringify` на том же словаре была бы вторым вызовом, за который никто не
+	# отвечает, а `JSON.parse_string` для проверки разбора — третьим.
+	var json_text := JSON.stringify(_canonical())
+	t.is_true("JSON: текст канона разобран", JSON.parse_string(json_text) != null)
+	var json_res := Loader.load_text(json_text, texts)
+	t.is_true("JSON: проблем нет", (json_res["problems"] as Array).is_empty())
+	t.is_true("JSON: миссия собрана", json_res["mission"] != null)
+	if json_res["mission"] == null:
+		return t.results
+	var by_json = json_res["mission"]
+
+	# --- 3. ПУТЬ «КОД»: граф — фикстура, разделы — та же полезная нагрузка ------------
+	# Фикстура собирает граф вызовами `add_*`, а разделы контента кладёт `set_data` —
+	# тем же вызовом, что и `load_mission`. Это и делает третий путь сравним: у фикстуры
+	# нет и не должно быть второго способа задать `data`.
+	var by_code = Fixture.build()
+	# ЧТО фикстура кладёт в `data` САМА — сверяется с каноном ДО `set_data`. Это
+	# единственное место, где рукописный канон и рукописная фикстура сходятся напрямую,
+	# и без него расхождение между ними не падало бы тестом: проба «поменять цену
+	# молчания в `Fixture.WINDOWS`» оставляла набор зелёным, потому что дальше `set_data`
+	# перезаписывал разделы каноном и обе стороны сравнения становились одной записью.
+	# Проверка намеренно стоит до перезаписи: она стережёт сам рукописный двойник.
+	t.eq("код: фикстура сама кладёт окна канона", by_code.data["windows"], _canonical()["windows"])
+	by_code.set_data({
+		"windows": _canonical()["windows"],
+		"intel": _canonical()["intel"],
+		"access_points": _canonical()["access_points"],
+		"texts": texts.duplicate(true),
+		"title_key": String(_canonical()["title_key"]),
+	})
+	t.is_true("код: миссия фикстуры валидна", (by_code.validate() as Array).is_empty())
+
+	# --- 4. МОДЕЛЬ: три пути по кругу, со всеми полями --------------------------------
+	_compare_models(t, "код ↔ словарь", by_code, by_dict)
+	_compare_models(t, "код ↔ JSON", by_code, by_json)
+	_compare_models(t, "словарь ↔ JSON", by_dict, by_json)
+
+	# --- 5. `data` — ОТДЕЛЬНОЕ представление, сверяется по значению -------------------
+	# У JSON-пути числа в `data` — float по природе формата, поэтому его сторона
+	# сравнивается в каноническом виде (см. `_canonical_form`); у словаря и фикстуры
+	# сравнение строгое. Типы чисел МОДЕЛИ проверяются отдельно (§6) и строго.
+	_compare_payload(t, "код ↔ словарь", by_code.data, by_dict.data)
+	_compare_payload(t, "код ↔ JSON", by_code.data, by_json.data, true)
+	_compare_payload(t, "словарь ↔ JSON", by_dict.data, by_json.data, true)
+
+	# Положительные контроли: сравнение разделов не вырождено. Размеры и значения сверяются
+	# с КАНОНОМ — независимой рукописной записью, а не с константой фикстуры.
+	#
+	# Почему это отдельный контроль, а не следствие сравнения выше. Проба «поменять цену
+	# молчания в фикстуре» (`small_mission.gd`: `neutral delay 3 → 4`) оставляла набор
+	# зелёным ДВАЖДЫ: сначала потому, что канон брал `Fixture.WINDOWS` (обе стороны
+	# сравнения — одна константа), потом потому, что обе стороны `_compare_payload`
+	# выводятся из канона. Сравнение двух производных одного источника уличить сам источник
+	# не может, поэтому разделы пути «код» сверяются с каноном НАПРЯМУЮ.
+	t.is_true("data: разделы непусты — окна, разведка, точки доступа, тексты",
+		not by_dict.data["windows"].is_empty() and not by_dict.data["intel"].is_empty()
+		and not by_dict.data["access_points"].is_empty() and not by_dict.data["texts"].is_empty())
+	t.eq("data: окон ровно столько, сколько в каноне",
+		(by_dict.data["windows"] as Array).size(), (_canonical()["windows"] as Array).size())
+	t.eq("data: окна (код) равны канону", by_code.data["windows"], _canonical()["windows"])
+	t.eq("data: окна (словарь) равны канону", by_dict.data["windows"], _canonical()["windows"])
+	t.eq("data: разведка (код) равна канону", by_code.data["intel"], _canonical()["intel"])
+	t.eq("data: разведка (словарь) равна канону", by_dict.data["intel"], _canonical()["intel"])
+	t.eq("data: точки доступа (код) равны канону", by_code.data["access_points"],
+		_canonical()["access_points"])
+	t.eq("data: точки доступа (словарь) равны канону", by_dict.data["access_points"],
+		_canonical()["access_points"])
+	# У JSON-пути строгого равенства канону НЕТ и быть не может: числа в `data` приходят
+	# float (`3.0`), и `Dictionary ==` на `3.0` против `3` — ложь. Его сторона сверяется
+	# с каноном через канонический вид в `_compare_payload` выше; здесь сравнение формы
+	# записи выдавало бы три провала о float, а не о расхождении путей.
+	t.eq("data: title_key доехал", String(by_dict.data["title_key"]), "mission.small.title")
+	t.eq("data: тексты доехали разделом", by_dict.data["texts"], texts)
+
+	# --- 6. Сериализация не теряет данные и не портит типы ----------------------------
+	# JSON отдаёт числа float. `to_int` возвращает целое, и ядро обязано получить ИМЕННО
+	# `TYPE_INT`: `int` и `float` равны по значению, поэтому равенство выше этого не ловит.
+	t.is_true("JSON: шаги ребра остались целым", typeof(by_json.edges[3]["steps"]) == TYPE_INT)
+	t.is_true("JSON: шум ребра остался целым", typeof(by_json.edges[3]["noise"]) == TYPE_INT)
+	t.is_true("JSON: этаж помещения остался целым", typeof(by_json.nodes["it4"]["floor"]) == TYPE_INT)
+	t.is_true("JSON: период патруля остался целым", typeof(by_json.patrols[0]["period"]) == TYPE_INT)
+	for i in by_json.edges.size():
+		t.is_true("JSON: ребро %d — steps целое" % i, typeof(by_json.edges[i]["steps"]) == TYPE_INT)
+		t.is_true("JSON: ребро %d — noise целое" % i, typeof(by_json.edges[i]["noise"]) == TYPE_INT)
+	for node_id in by_json.nodes:
+		t.is_true("JSON: помещение %s — floor целое" % node_id,
+			typeof(by_json.nodes[node_id]["floor"]) == TYPE_INT)
+
+	# --- 7. ПЛАН: вторая половина третьей точки входа ---------------------------------
+	# Канонический план: маршрут через запертую дверь (иначе окно не откроется ни разу),
+	# явный запасной выход и груз — каждое из этих полей обязано доехать до `Plan`.
+	var plan_data := {
+		"route": ["dock", "hall", "office2", "vault"],
+		"exit_node": "dock",
+		"exit_backup_node": "archive0",
+		"cargo_heavy": true,
+		"agents": [
+			{"id": "kira", "role": "tactician", "understanding": 3},
+			{"id": "echo", "role": "comms", "understanding": 2},
+		],
+	}
+	var plan_dict = Loader.load_plan(plan_data)
+	# Путь «код» для плана — `Plan`, собранный полями вручную: план не «загружается» из
+	# файла, его строит фаза планирования. Сверка ловит потерю поля на пути загрузки
+	# (забытый `cargo_heavy` или срезанный состав) и заодно держит план непустым: на двух
+	# пустых планах сравнение «совпало» ничего не доказывало бы.
+	var plan_code := Plan.new()
+	plan_code.route = ["dock", "hall", "office2", "vault"]
+	plan_code.exit_node = "dock"
+	plan_code.exit_backup_node = "archive0"
+	plan_code.cargo_heavy = true
+	plan_code.agents = plan_data["agents"].duplicate(true)
+	t.eq("план: путь «код» совпадает со словарём", _plan_of(plan_code), _plan_of(plan_dict))
+	t.is_true("план: маршрут непуст", not plan_dict.route.is_empty())
+
+	# Три правила плана, одинаковые на всех путях: явный `[]` — значение («бойцов нет»),
+	# мусор в поле — поле игнорируется (остаётся умолчание `Plan`), дубль `id` —
+	# остаётся ПЕРВАЯ запись. Плана эти правила касаются отдельно от миссии: у плана нет
+	# валидатора, и «мусор в поле» здесь молчаливое решение, а не отказ.
+	var plan_cases := [
+		["явный пустой состав", {"agents": []}],
+		["дубль id", {"agents": [
+			{"id": "kira", "role": "tactician", "understanding": 3},
+			{"id": "kira", "role": "comms", "understanding": 5},
+		]}],
+		["мусор вместо состава", {"agents": "не массив"}],
+		["мусор в маршруте", {"route": ["dock", {"hall": true}, 7, "vault"]}],
+		["мусор в выходах", {"exit_node": ["dock"], "exit_backup_node": {"a": 1}}],
+		["мусор в грузе", {"cargo_heavy": "да"}],
+	]
+	for case in plan_cases:
+		var label: String = case[0]
+		var payload: Dictionary = case[1]
+		var from_dict = Loader.load_plan(payload)
+		var from_json = Loader.load_plan(JSON.parse_string(JSON.stringify(payload)))
+		# Сверяются ВСЕ поля плана, включая размер и содержимое состава: JSON-путь обязан
+		# повторить решения словаря, а не только «собраться без падения».
+		t.eq("план (%s): JSON = словарь" % label, _plan_of(from_json), _plan_of(from_dict))
+	# Три правила по отдельности: сравнение двух путей выше не заметило бы, что оба пути
+	# одинаково НЕВЕРНЫ (например, оба подставляют боевой состав вместо явного `[]`).
+	t.eq("план: явный [] — ровно пустой состав (не умолчание)",
+		Loader.load_plan({"agents": []}).agents, [])
+	t.eq("план: дубль id — осталась первая запись",
+		Loader.load_plan({"agents": [
+			{"id": "kira", "role": "tactician", "understanding": 3},
+			{"id": "kira", "role": "comms", "understanding": 5},
+		]}).agents, [{"id": "kira", "role": "tactician", "understanding": 3}])
+	t.eq("план: мусор вместо состава — умолчание `Plan` (не пустота)",
+		_ids(Loader.load_plan({"agents": "не массив"}).agents, "id"), ["echo", "kira"])
+	t.eq("план: по умолчанию состав — умолчание `Plan`",
+		_ids(Loader.load_plan({}).agents, "id"), _ids(Plan.new().agents, "id"))
+
+	# --- 8. ОТПЕЧАТОК ПРОГОНА: тот же вход — тот же исход -----------------------------
+	# Главное утверждение задачи: один и тот же сценарий приказов и один и тот же seed
+	# дают ОДИН отпечаток на всех трёх путях. Сценарий `["breach", "silence"]` выбран так,
+	# чтобы окно у запертой двери действительно открылось: молчание после выбитой двери —
+	# вторая половина того же окна, и без неё часть данных контента в прогоне не читалась
+	# бы вовсе. Два seed — потому что кубик импровизации (D7) читает seed, и совпадение
+	# на одном значении могло бы быть случайным.
+	var orders := ["breach", "silence"]
+	var seeds := [5, 7]
+	for seed in seeds:
+		# Один и тот же вызов трёх путей — ради ОДНОГО отпечатка. `by_dict`/`by_json`
+		# переиспользуются на всех кругах: миссия иммутабельна (открытые двери живут
+		# в `Sim`, это закреплено `test_harness.gd`). Здесь это ещё и условие честности:
+		# пересборка модели на каждом круге маскировала бы расхождение путей.
+		var by_code_report: Dictionary = Harness.run_scenario(
+			by_code, Loader.load_plan(plan_data), orders, {"seed": seed})
+		var by_dict_report: Dictionary = Harness.run_scenario(
+			by_dict, Loader.load_plan(plan_data), orders, {"seed": seed})
+		var by_json_report: Dictionary = Harness.run_scenario(
+			by_json, Loader.load_plan(plan_data), orders, {"seed": seed})
+		t.eq("отпечаток (seed %d): код и словарь" % seed,
+			by_code_report["digest"], by_dict_report["digest"])
+		t.eq("отпечаток (seed %d): словарь и JSON" % seed,
+			by_dict_report["digest"], by_json_report["digest"])
+		t.is_true("отпечаток (seed %d) непуст" % seed, String(by_dict_report["digest"]) != "")
+		# Сценарий действительно выполнился до конца: «три пути совпали» на отчёте
+		# `invalid_mission` доказывало бы только то, что все три входа одинаково негодны.
+		t.eq("прогон (seed %d): миссия принята" % seed,
+			String(by_dict_report["outcome"]) != "invalid_mission", true)
+		# Запертая дверь — то место, ради которого окно и существует: без неё в прогоне
+		# не выполнялась бы часть данных контента.
+		t.is_true("прогон (seed %d): дверь была заперта на старте" % seed,
+			bool(by_code.edge("e_office_vault")["locked"]))
+		# Повтор того же входа — тот же отпечаток (детерминизм), и это НЕ тот же вызов,
+		# что выше: модель собирается заново из словаря.
+		t.eq("прогон (seed %d): повтор совпал" % seed, by_dict_report["digest"],
+			Harness.run_scenario(Loader.load_mission(_canonical(), texts)["mission"],
+				Loader.load_plan(plan_data), orders, {"seed": seed})["digest"])
+
+	# 8б. Отпечаток РАЗЛИЧАЕТ вход: иначе «все совпали» ничего не стоит.
+	#
+	# Два seed взяты там, где бросок кубика ВИДЕН, и это результат пробы, а не вкусовщина.
+	# Кубик импровизации (D7) — единственное место с `rng`, и бросается он при молчании
+	# у запертой двери. На сценарии «выбить дверь, потом молчать» отпечаток у seed 4, 5 и 7
+	# ОДИН И ТОТ ЖЕ (17 шагов, шум 44 у всех): дверь уже открыта приказом, и цена молчания
+	# ничего не меняет. Проверка «разные seed — разные отпечатки» на таком сценарии падала
+	# бы на верном коде; на `["silence"]` различие исходов видно (17 шагов и шум 41 против
+	# 19 шагов и шума 36).
+	var seed_scripts := [["silence"], ["silence", "silence"]]
+	for script in seed_scripts:
+		var d4: Dictionary = Harness.run_scenario(by_dict, Loader.load_plan(plan_data), script, {"seed": 4})
+		var d5: Dictionary = Harness.run_scenario(by_dict, Loader.load_plan(plan_data), script, {"seed": 5})
+		# Сверяется РАЗНЫЙ ИСХОД, а не только разные строки отпечатка: два одинаковых
+		# прогона с разными строками ничего не доказывали бы про seed.
+		t.is_true("сценарий %s: seed 4 и seed 5 дают разные отпечатки" % str(script),
+			d4["digest"] != d5["digest"])
+		t.is_true("сценарий %s: seed 4 — другой шум, чем seed 5" % str(script),
+			int(d4["noise"]) != int(d5["noise"]))
+	# JSON-путь не «съедает» seed: на том же входе он даёт те же два отпечатка, что словарь.
+	t.eq("JSON-путь: seed 4 даёт тот же отпечаток, что словарь",
+		Harness.run_scenario(by_json, Loader.load_plan(plan_data), seed_scripts[0], {"seed": 4})["digest"],
+		Harness.run_scenario(by_dict, Loader.load_plan(plan_data), seed_scripts[0], {"seed": 4})["digest"])
+	t.eq("JSON-путь: seed 5 даёт тот же отпечаток, что словарь",
+		Harness.run_scenario(by_json, Loader.load_plan(plan_data), seed_scripts[0], {"seed": 5})["digest"],
+		Harness.run_scenario(by_dict, Loader.load_plan(plan_data), seed_scripts[0], {"seed": 5})["digest"])
+	# Состав плана виден в отпечатке: боец с Пониманием 1 меняет исход найма (D9/D31),
+	# значит «план совпал» — утверждение про отчёт, который план действительно читает,
+	# а не про поле, до отчёта не доехавшее.
+	var plan_weaker := Loader.load_plan({
+		"route": plan_data["route"],
+		"exit_node": plan_data["exit_node"],
+		"agents": [{"id": "kira", "role": "tactician", "understanding": 1}],
+	})
+	t.is_true("отпечаток зависит от состава плана",
+		Harness.run_scenario(by_dict, Loader.load_plan(plan_data), ["silence"], {"seed": 5})["digest"]
+		!= Harness.run_scenario(by_dict, plan_weaker, ["silence"], {"seed": 5})["digest"])
+	# Маршрут виден в отпечатке — иначе «план совпал» ничего не говорило бы про маршрут.
+	var plan_other_route := Loader.load_plan({
+		"route": ["dock", "archive0"],
+		"exit_node": "dock",
+		"agents": plan_data["agents"],
+	})
+	t.is_true("отпечаток зависит от маршрута плана",
+		Harness.run_scenario(by_dict, Loader.load_plan(plan_data), ["breach"], {"seed": 5})["digest"]
+		!= Harness.run_scenario(by_dict, plan_other_route, ["breach"], {"seed": 5})["digest"])
+
+	return t.results
+
+
+## Множества id раздела — тот же приём, что в `test_content_loader.gd`: сверка состава
+## не зависит от порядка записей.
+func _ids(items: Array, field: String) -> Array:
+	var out: Array = []
+	for item in items:
+		out.append(String(item[field]))
+	out.sort()
+	return out

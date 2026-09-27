@@ -16,6 +16,7 @@ const CASES := [
 	"res://tests/cases/test_content_problems.gd",
 	"res://tests/cases/test_content_validator.gd",
 	"res://tests/cases/test_content_loader.gd",
+	"res://tests/cases/test_three_paths.gd",
 	"res://tests/cases/test_handoff_skeleton.gd",
 	"res://tests/cases/test_scales.gd",
 	"res://tests/cases/test_radio.gd",

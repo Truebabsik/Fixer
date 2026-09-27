@@ -82,8 +82,14 @@
 
 ## Гейт
 
+> **Поправка от 2026-09-27.** В первой редакции здесь стоял `--check-only` как ворота разбора — команда,
+> которую теперь запрещает `docs/agents/constraints.md` §2: она разбирает только указанный скрипт и его
+> статические `preload`, а динамически загружаемые модули и кейсы не видит, поэтому при реальной
+> синтаксической ошибке возвращает код 0. Ревьюер задачи 6 это заметил. Актуальные команды — по
+> `constraints.md` §2, ниже.
+
 ```powershell
-tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --check-only --script res://tests/run.gd
+tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --script res://tests/preflight.gd
 tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --script res://tests/run.gd
 tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --script res://tests/run_red.gd
 ```
