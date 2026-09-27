@@ -481,9 +481,21 @@ static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array)
 			if route != null:
 				if (route as Array).size() < 2:
 					problems.append(Problems.bad_value("%s.route" % path, "маршрут патруля короче двух точек"))
+				## «О маршруте можно судить»: каждый его узел существует, и каждая соседняя
+				## пара соединена ребром. Пока это не так, корень разрыва уже назван своим
+				## диагнозом (`BAD_REF` на узле, `BAD_VALUE` на паре или на всём разделе
+				## `edges`), и замыкание НЕ судится: иначе одна опечатка в узле из трёх
+				## точек давала три диагноза на один дефект, а не-массив в `edges` —
+				## `PATROL_ROUTE_OPEN` на каждом патруле (находка Minor 3 ревью 4; принцип
+				## шапки файла «одна ошибка — одно следствие», §15 спецификации).
+				## Пустой словарь `nodes` — тот же случай: раздела нет, о существовании
+				## узлов судить нечем, и о замыкании тоже.
+				var nodes_known := not nodes.is_empty()
+				var route_judgeable := nodes_known
 				for n in route:
-					if not nodes.is_empty() and not nodes.has(String(n)):
+					if nodes_known and not nodes.has(String(n)):
 						problems.append(Problems.bad_ref("%s.route" % path, "нет помещения «%s»" % String(n)))
+						route_judgeable = false
 				## Движок путь не ищет: охранник идёт по СПИСКУ, узлы берутся по индексу
 				## (`sim/sim.gd:_advance_guards`), и разрыв означает, что патруль
 				## оказывается в помещении, которого не проходит. Соседние точки обязаны
@@ -494,6 +506,7 @@ static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array)
 						problems.append(Problems.bad_value("%s.route" % path,
 							"разрыв маршрута: «%s» и «%s» не соединены ребром"
 							% [String(route[k]), String(route[k + 1])]))
+						route_judgeable = false
 				## ЗАМЫКАНИЕ маршрута: индекс растёт по модулю длины списка
 				## (`sim/sim.gd:_advance_guards` — `(patrol_index + 1) % size`), поэтому
 				## после последней точки идёт первая, и замыкающая пара — такое же ребро
@@ -507,7 +520,13 @@ static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array)
 				##  * маршрут, возвращающийся в первую точку (`a, b, a`): «переход» из
 				##    точки в неё же ребром не является (петли запрещены), а ядро такой
 				##    шаг проходит как стояние на месте — замыкать нечего.
-				if size >= 3 and String(route[0]) != String(route[size - 1]) \
+				##
+				## Последнее условие — `route_judgeable` (см. выше): на маршруте, где уже
+				## назван разрыв пары или несуществующий узел, замыкание не судится, и
+				## `PATROL_ROUTE_OPEN` не выдаётся. Здоровый маршрут с ОДНИМ разрывом в
+				## замыкающей паре при этом по-прежнему получает ровно один диагноз: все
+				## узлы на месте, все соседние пары соединены — судить есть о чём.
+				if route_judgeable and size >= 3 and String(route[0]) != String(route[size - 1]) \
 						and not _connected(String(route[size - 1]), String(route[0]), data):
 					problems.append(Problems.patrol_route_open("%s.route" % path,
 						String(route[size - 1]), String(route[0])))

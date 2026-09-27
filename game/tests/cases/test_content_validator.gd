@@ -444,6 +444,70 @@ func run() -> Array:
 	t.eq("маршрут «туда и обратно» — не разрыв замыкания",
 		_codes_at(Validator.validate(there_and_back, null), "patrols[0].route"), [])
 
+	# I6в. ГРАНИЦА нового правила: замыкание судится только тогда, когда о маршруте можно
+	# судить — все узлы существуют и все соседние пары соединены. Здесь у трёхточечного
+	# маршрута один узел не существует: `BAD_REF` на нём уже назвал корень, и соседняя пара
+	# с ним — тот же корень, а не второй разрыв. До правки сюда добавлялся третий диагноз,
+	# `PATROL_ROUTE_OPEN` про замыкающую пару `нет_такого → entry` (находка Minor 3 ревью 4:
+	# три диагноза на одну опечатку). Ассерт называет ВЕСЬ список диагнозов маршрута, а не
+	# «PATROL_ROUTE_OPEN нет»: отсутствие кода верно и тогда, когда правило выключено вовсе,
+	# а пара `BAD_REF` + `BAD_VALUE` доказывает, что маршрут действительно разобран.
+	var bad_ref_route := _good()
+	bad_ref_route["patrols"][0]["route"] = ["entry", "hall", "нет_такого"]
+	var bad_ref_route_problems: Array = Validator.validate(bad_ref_route, null)
+	t.eq("опечатка в узле маршрута — только BAD_REF и BAD_VALUE, замыкание не судится",
+		_codes_at(bad_ref_route_problems, "patrols[0].route"),
+		[Problems.BAD_REF, Problems.BAD_VALUE])
+
+	# I6в-2. Вторая половина того же условия, которую первый ассерт НЕ держит: узел маршрута
+	# не существует, но рёбра его «соединяют» — опечатка в id живёт и в маршруте, и в рёбрах
+	# (автор переименовал помещение в двух местах, а в `nodes` — нет). Формально все соседние
+	# пары соединены, и судить о замыкании можно было бы; но помещения, вокруг которого
+	# строится цикл, в файле нет, и корень уже назван `BAD_REF`. Проба A2 (снят флаг на узле)
+	# краснит ровно этот ассерт: без узлового флага выходит ещё и `PATROL_ROUTE_OPEN`.
+	var ghost_route := _good()
+	ghost_route["edges"].append({"id": "e_hall_ghost", "a": "hall", "b": "нет_такого",
+		"kind": "corridor", "steps": 1, "noise": 0})
+	ghost_route["patrols"][0]["route"] = ["entry", "hall", "нет_такого"]
+	t.eq("узел маршрута не существует, хотя рёбра его «соединяют» — замыкание не судится",
+		_codes_at(Validator.validate(ghost_route, null), "patrols[0].route"),
+		[Problems.BAD_REF])
+
+	# I6г. Сломанный РАЗДЕЛ `edges` (не массив): о рёбрах нечего спросить, и каждая
+	# соседняя пара названа `BAD_VALUE`. Замыкание при этом не судится НИ НА ОДНОМ патруле:
+	# до правки каждый патруль получал ещё и `PATROL_ROUTE_OPEN` про пару, о которой уже
+	# сказано (находка Minor 3 ревью 4, проба C4). Два патруля в фикстуре — чтобы «не выдан
+	# ни на одном» не проходило на единственном патруле по случайности.
+	var broken_edges := _good()
+	broken_edges["patrols"].append({"id": "guard_2", "route": ["entry", "hall", "vault"], "period": 4})
+	broken_edges["patrols"][0]["route"] = ["entry", "hall", "vault"]
+	broken_edges["edges"] = {}
+	var broken_edges_problems: Array = Validator.validate(broken_edges, null)
+	t.is_false("раздел edges не массив — PATROL_ROUTE_OPEN не выдан ни на одном патруле",
+		Problems.has(broken_edges_problems, Problems.PATROL_ROUTE_OPEN))
+	t.eq("раздел edges не массив — разрывы пар первого патруля названы по одному на пару",
+		_codes_at(broken_edges_problems, "patrols[0].route"),
+		[Problems.BAD_VALUE, Problems.BAD_VALUE])
+	t.eq("раздел edges не массив — разрывы пар второго патруля названы так же",
+		_codes_at(broken_edges_problems, "patrols[1].route"),
+		[Problems.BAD_VALUE, Problems.BAD_VALUE])
+
+	# I6д. Сломанный РАЗДЕЛ `nodes`: о существовании узлов маршрута судить нечем — ссылки
+	# `BAD_REF` здесь не выписываются намеренно (иначе пустой раздел дал бы по диагнозу на
+	# каждый узел каждого патруля). Раз маршрут называет помещения, которых в файле нет,
+	# разрыв замыкания — не отдельный дефект, и `PATROL_ROUTE_OPEN` не выдаётся. Заодно
+	# видно число следствий пустого раздела: ровно одно.
+	var no_nodes := _good()
+	no_nodes["nodes"] = {}
+	no_nodes["patrols"][0]["route"] = ["entry", "hall", "vault"]
+	var no_nodes_problems: Array = Validator.validate(no_nodes, null)
+	t.is_false("раздел nodes пуст — PATROL_ROUTE_OPEN не выдан",
+		Problems.has(no_nodes_problems, Problems.PATROL_ROUTE_OPEN))
+	t.eq("раздел nodes пуст — о маршруте не сказано ничего",
+		_codes_at(no_nodes_problems, "patrols[0].route"), [])
+	t.eq("раздел nodes пуст — диагноз один, и он про сам раздел",
+		_codes(no_nodes_problems), [Problems.EMPTY_SECTION])
+
 	# 7. Ссылочная целостность.
 	var bad_edge := _good()
 	bad_edge["edges"][0]["b"] = "нет_такого"
@@ -1701,12 +1765,27 @@ func run() -> Array:
 	# 15з. `floors` — СЛОВАРЬ, а не седьмой раздел-массив. Массив вместо словаря назван
 	# `WRONG_TYPE` на своём пути; заодно видно, что `floors` НЕ попал в `ARRAY_SECTIONS`:
 	# попади он туда, `[]` был бы законным «этажей нет» и прошёл бы молча.
+	#
+	# Ассерт фиксирует ВСЮ картину, а не только путь `floors` (находка Minor 4 ревью 4:
+	# прежняя проверка закрепляла половину). Не-словарь в `floors` оставляет без ссылки
+	# КАЖДУЮ подпись этажа: ключи не собираются (`_walk_text_keys` ходит по словарю), и
+	# каждая подпись получает `DANGLING_TEXT` на своём ключе. Это то же следствие одного
+	# дефекта, что у испорченного поля-ключа (§15 спецификации: «висячий ключ исчезнет
+	# сам»), и оно НЕ гасится — ровно так же, как у `name_key`/`trace_key` (см. 15е, 15ж).
+	# Поэтому ожидание здесь посчитано руками (1 + по одной подписи на этаж), а не взято
+	# у валидатора: иначе ассерт не поймал бы ни потерю диагноза, ни лишний.
 	for bad_floors in [[], "этажи", 7]:
 		var floors_not_dict := _good_presented()
 		floors_not_dict["floors"] = bad_floors
+		var floors_not_dict_problems: Array = Validator.validate(floors_not_dict, _presentation_texts())
 		t.eq("floors = %s — WRONG_TYPE на своём пути" % str(bad_floors),
-			_codes_at(Validator.validate(floors_not_dict, _presentation_texts()), "floors"),
+			_codes_at(floors_not_dict_problems, "floors"),
 			[Problems.WRONG_TYPE])
+		t.eq("floors = %s — каждая подпись этажа осталась без ссылки" % str(bad_floors),
+			_codes_at(floors_not_dict_problems, "texts.floor."),
+			[Problems.DANGLING_TEXT, Problems.DANGLING_TEXT])
+		t.eq("floors = %s — диагнозов ровно 1 + по одному на подпись этажа" % str(bad_floors),
+			floors_not_dict_problems.size(), 3)
 
 	# 15и. Запись этажа: не словарь — `WRONG_TYPE`; без `name_key` — `MISSING_FIELD`;
 	# `name_key` не строкой — `WRONG_TYPE`. Три разных дефекта, три разных диагноза.
