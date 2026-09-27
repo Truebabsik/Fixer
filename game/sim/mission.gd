@@ -4,12 +4,35 @@ extends RefCounted
 
 const EDGE_KINDS := ["door", "corridor", "lift_main", "lift_freight", "stairs"]
 
+## Разделы данных, которые ядру передаёт контент-конвейер (content/loader.gd).
+## Это НЕ рантайм-состояние: ядро их читает, но не меняет. `data` держит разделы,
+## чья форма ещё не устоялась в жёстком API миссии — окна, разведданные, точки
+## доступа, тексты.
+const DATA_SECTIONS := ["windows", "intel", "access_points", "texts"]
+
 var id: String = ""
 var nodes: Dictionary = {}
 var edges: Array = []
 var patrols: Array = []
 var sensors: Array = []
 var objective: String = ""
+
+## Разделы контента, не входящие в жёсткое API выше. Пустой словарь с пустыми
+## массивами — валидное состояние: фикстура собирает миссию прежним API.
+var data: Dictionary = {}
+
+
+func _init() -> void:
+	for section in DATA_SECTIONS:
+		data[section] = []
+
+
+## Принять разделы контента. Ключи, которых схема не знает, здесь не проверяются:
+## это дело `content/validator.gd`, а не модели миссии.
+func set_data(sections: Dictionary) -> void:
+	for section in DATA_SECTIONS:
+		if sections.has(section):
+			data[section] = sections[section]
 
 
 func add_node(node_id: String, floor: int, tags: Array = []) -> void:
