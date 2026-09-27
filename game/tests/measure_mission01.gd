@@ -39,7 +39,11 @@ const EXIT_NODE := "hall0"
 const STUCK_LIFT_EDGE := "e_freight_4_0"
 const FREIGHT_UP_EDGE := "e_freight_1_4"
 const LIFT_NODE4 := "it_open4"
-## Запертая дверь архива: единственное ребро `archive0`. Окно `w_archivist` висит на нём.
+## Ребро окна `w_archivist`. Это НЕ единственное ребро `archive0`: у него их два —
+## `e_hall0_archive0` (дверь из `hall0`, заперта) и `e_freight_4_0` (грузовой лифт из
+## `it_open4`, перекрывается тревогой). `ARCHIVE_DOOR_EDGE` называет именно ДВЕРЬ, потому
+## что на ней висит окно архивариуса (его `trigger.edge`), и по этому ребру считается
+## столбец «архив» раздела 2; второе ребро к окну не относится.
 const ARCHIVE_DOOR_EDGE := "e_hall0_archive0"
 ## Сенсор окна `w_off_schedule`. Его актор — ОХРАНА, а не группа (`sim.gd:_actor_in_sensor`),
 ## поэтому отдельно проверяется, что выданная «игроку» задержка уходит охраннику.
@@ -186,6 +190,7 @@ func _measure() -> int:
 	_print_per_run(rows)
 	_print_aggregate(rows)
 	_print_window_coverage(mission, rows)
+	var archive_mismatch := _check_archive_total(rows)
 	_print_skip_reasons(rows)
 	_print_scene27(rows)
 	_print_stalled(rows)
@@ -219,7 +224,8 @@ func _measure() -> int:
 	_print_summary(rows)
 	if not missed.is_empty():
 		print("ВНИМАНИЕ, инструмент: %s" % "; ".join(missed))
-	var ok := bool(det[0]["same"]) and bool(det[1]["same"]) and missed.is_empty()
+	var ok := bool(det[0]["same"]) and bool(det[1]["same"]) and missed.is_empty() \
+		and archive_mismatch == ""
 	if ok:
 		print("ИТОГ ЗАМЕРА: состоялся (код 0; вердиктом набора инструмент не является)")
 	else:
@@ -582,15 +588,18 @@ func _print_per_run(rows: Array) -> void:
 			int(row["compromises"]), int(row["bad_silences"]),
 			_step_or_dash(int(row["alarm_step"])), _step_or_dash(int(row["arrive4_step"])),
 			_steps_or_dash(_unique(row["board_steps"])), _steps_or_dash(row["stuck_steps"]),
-			_steps_or_dash(row["archivist_steps"])])
+			str((row["archivist_steps"] as Array).size())])
 	print("")
 	print("Источники: окон — `window_opened`; приказов — `order_issued`; молчаний — `order_silenced`;")
 	print("отказы — `order_refused.reason`; тревога — `alarm_raised.step`; 4эт — `agent_moved.node=%s`;" % LIFT_NODE4)
 	print("посадка — `agent_moved.edge=%s`; ★27 — `window_opened` (kind=locked_door, edge=%s);" % [
 		STUCK_LIFT_EDGE, STUCK_LIFT_EDGE])
-	print("архив — `window_opened` (edge=%s); ран/пог — `result().injured`/`dead`;" % ARCHIVE_DOOR_EDGE)
+	print("архив — СКОЛЬКО раз открылось окно архивариуса (`window_opened`, edge=%s), а не шаг:" % ARCHIVE_DOOR_EDGE)
+	print("его шаги печатают разделы 4г и 4д, а сходимость суммы столбца с разделом 4 проверяет 4а;")
+	print("ран/пог — `result().injured`/`dead`;")
 	print("засв — `agent_compromised` (каждое +5 шума на бойца), bad — молчаний с исходом `bad` (+5 шума);")
 	print("шум/эфир/отпечаток/пул — `result()`.")
+	print("Остальные столбцы после «bad» (трев, 4эт, посадка, ★27) — ШАГИ событий, а не счётчики.")
 	print("")
 
 
@@ -662,6 +671,30 @@ func _print_window_coverage(mission, rows: Array) -> void:
 		print("  %-16s %-24s открылось: %d" % [
 			str(w.get("id", "")), rid, int(total.get(rid, 0))])
 	print("")
+
+
+## Сходимость двух счётчиков одного и того же: столбца «архив» раздела 2 и раздела 4.
+## Это РАЗНЫЕ пути учёта — `if` по виду и якорю события в `_row` против карты `by_window`
+## там же, — и расхождение означает, что подпись столбца и его счёт разошлись. Ровно так и
+## вышло у столбца «архив»: он печатал ШАГ открытия окна (40), читался как число открытий,
+## и рядом стоял раздел 4 с честными 32 (находка Minor 1 финального ревью). Теперь столбец
+## считает открытия, а сходимость с разделом 4 проверяется здесь и входит в вердикт
+## инструмента (код 1 при расхождении): проба — подмена ребра в ветке `archivist_steps`.
+func _check_archive_total(rows: Array) -> String:
+	var rid := "%s:%s" % [WindowScript.kind_for("locked_edge"), ARCHIVE_DOOR_EDGE]
+	var column := 0
+	var section4 := 0
+	for row in rows:
+		column += (row["archivist_steps"] as Array).size()
+		section4 += int((row["by_window"] as Dictionary).get(rid, 0))
+	print("== 4а. Сходимость счёта: столбец «архив» раздела 2 против раздела 4 (окно %s) ==" % rid)
+	print("  открытий по столбцу (Σ по %d прогонам) — %d; по разделу 4 (карта `by_window`) — %d" % [
+		rows.size(), column, section4])
+	if column == section4:
+		print("  сходится: столбец «архив» считает то же, что раздел 4.")
+		return ""
+	print("  РАСХОЖДЕНИЕ: два счёта одного и того же разошлись — починить инструмент, не данные.")
+	return "столбец «архив» = %d, раздел 4 = %d (окно %s)" % [column, section4, rid]
 
 
 func _print_skip_reasons(rows: Array) -> void:

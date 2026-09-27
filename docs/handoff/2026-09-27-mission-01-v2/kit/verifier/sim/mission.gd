@@ -12,7 +12,7 @@ const EDGE_KINDS := ["door", "corridor", "lift_main", "lift_freight", "stairs"]
 ## Умолчания разные: разделы-списки начинаются пустым массивом, `title_key` — пустой
 ## строкой. Поэтому список и умолчания разведены, а не собраны одним циклом.
 const DATA_SECTIONS := ["windows", "intel", "access_points", "texts", "title_key"]
-## Держать в согласии с `Validator.ARRAY_SECTIONS` (`content/validator.gd:43`): там — ВСЕ
+## Держать в согласии с `Validator.ARRAY_SECTIONS` (`content/validator.gd`): там — ВСЕ
 ## шесть корневых массивов ФАЙЛА (`edges`, `patrols`, `sensors` живут в жёстком API миссии
 ## и через `data` не едут), здесь — что модель принимает в `data`. Списки не равны
 ## дословно, но новая секция контента обязана появиться в обоих, иначе файл пройдёт

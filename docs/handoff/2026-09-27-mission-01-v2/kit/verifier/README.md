@@ -16,6 +16,7 @@
 kit/verifier/            ← это и есть проект, который запускается
     project.godot        минимальный проект Godot 4.7 (без автозагрузок, сцен и плагинов)
     verify.gd            раннер: читает два файла, печатает проблемы, отдаёт код возврата
+    selfcheck.gd         проверка САМОГО ПАКЕТА: ищет в его файлах следы нашего репозитория
     content/validator.gd копия нашего валидатора
     content/problems.gd  копия кодов проблем
     content/loader.gd    копия загрузчика (собирает модель из проверенных данных)
@@ -43,6 +44,8 @@ kit/example/             ← образец в текущей форме, к н�
 - **Linux:** `Godot_v4.7.2-stable_linux.x86_64`.
 
 Дальше — **дословные команды**. Замени только пути (`<...>`) и имя исполняемого файла Godot.
+**Пути к файлам давай абсолютные** — так они работают из любого каталога; почему — в разборе
+команды ниже.
 
 ### Windows (PowerShell или cmd)
 
@@ -50,26 +53,26 @@ kit/example/             ← образец в текущей форме, к н�
 Godot_v4.7.2-stable_win64_console.exe --headless --path <путь к kit\verifier> --script res://verify.gd -- <путь к mission.json> <путь к texts.json>
 ```
 
-Прогон на образце (из корня распакованного пакета):
+Прогон на образце (подставь полный путь к распакованному пакету):
 
 ```powershell
-Godot_v4.7.2-stable_win64_console.exe --headless --path .\kit\verifier --script res://verify.gd -- .\kit\example\mission.example.json .\kit\example\texts.example.json
+Godot_v4.7.2-stable_win64_console.exe --headless --path C:\packet\kit\verifier --script res://verify.gd -- C:\packet\kit\example\mission.example.json C:\packet\kit\example\texts.example.json
 ```
 
-Прогон на своём файле (файлы лежат рядом с пакетом):
+Прогон на своём файле:
 
 ```powershell
-Godot_v4.7.2-stable_win64_console.exe --headless --path .\kit\verifier --script res://verify.gd -- .\mission.json .\texts.json
+Godot_v4.7.2-stable_win64_console.exe --headless --path C:\packet\kit\verifier --script res://verify.gd -- C:\work\mission.json C:\work\texts.json
 ```
 
 ### Linux
 
 ```bash
-./Godot_v4.7.2-stable_linux.x86_64 --headless --path ./kit/verifier --script res://verify.gd -- ./kit/example/mission.example.json ./kit/example/texts.example.json
+./Godot_v4.7.2-stable_linux.x86_64 --headless --path /home/you/packet/kit/verifier --script res://verify.gd -- /home/you/packet/kit/example/mission.example.json /home/you/packet/kit/example/texts.example.json
 ```
 
 ```bash
-./Godot_v4.7.2-stable_linux.x86_64 --headless --path ./kit/verifier --script res://verify.gd -- ./mission.json ./texts.json
+./Godot_v4.7.2-stable_linux.x86_64 --headless --path /home/you/packet/kit/verifier --script res://verify.gd -- /home/you/mission.json /home/you/texts.json
 ```
 
 **Разбор команды, чтобы не гадать:**
@@ -80,9 +83,13 @@ Godot_v4.7.2-stable_win64_console.exe --headless --path .\kit\verifier --script 
 | `--path <kit/verifier>` | корень проекта: здесь `res://` указывает на папку комплекта |
 | `--script res://verify.gd` | что запустить |
 | `--` | **обязателен**: всё после него — аргументы скрипта, а не движка |
-| `<mission.json> <texts.json>` | ровно два пути, в этом порядке |
+| `<mission.json> <texts.json>` | ровно два пути, в этом порядке; **абсолютные** — надёжнее |
 
-Пути можно давать абсолютные или относительные; кавычки — если в пути есть пробелы.
+**Почему пути лучше абсолютные.** Движок считает относительный путь **от папки комплекта**
+(`kit/verifier`), а не от текущего каталога: команда `-- .\kit\example\mission.example.json`
+из корня пакета даёт `НЕ ПРОЧИТАНО … (код ошибки 7)`. Относительный путь тоже годится, если
+считать его от комплекта (`..\example\mission.example.json`), но абсолютный не надо считать
+вовсе. Кавычки — если в пути есть пробелы.
 
 ---
 
@@ -112,7 +119,7 @@ Godot_v4.7.2-stable_win64_console.exe --headless --path .\kit\verifier --script 
 
 ```
 ПРОБЛЕМ: 1
-  1. [MISSING_SILENCE] windows.w_server_door — у окна нет молчания — а оно обязано быть у каждого (D23)
+  1. [MISSING_SILENCE] windows.w_server_door — у окна нет молчания — а оно обязано быть у каждого: молчание встроено в форму окна и приказа не тратит
 ВЕРДИКТ: проблемы есть — уровень не принят (код 1)
 ```
 
@@ -169,3 +176,41 @@ Godot_v4.7.2-stable_win64_console.exe --headless --path .\kit\verifier --script 
 
 Если какая-то проба **не краснеет** — это находка: скажи нам, в комплекте или в валидаторе
 расхождение.
+
+---
+
+## 6. Проверка самодостаточности: пакет ни на что наше не ссылается
+
+Рядом с раннером лежит `selfcheck.gd`. Он проверяет **не твой файл, а сам пакет**: проходит
+по всем его файлам и краснеет, если в них остался след нашего репозитория — путь к нашим
+документам, внутренний номер нашего решения, имя нашего набора тестов, ссылка на наш разбор
+или имя документа, которого в пакете нет.
+
+```powershell
+Godot_v4.7.2-stable_win64_console.exe --headless --path C:\packet\kit\verifier --script res://selfcheck.gd
+```
+
+Путь к комплекту — полный, как и в §2. Запускать **из пакета**: скрипт сам находит папку
+пакета выше комплекта (это видно в первой строке вывода — `КОРЕНЬ ПАКЕТА`). Как выглядит
+чистый прогон:
+
+```
+КОРЕНЬ ПАКЕТА: .../2026-09-27-mission-01-v2
+ФАЙЛОВ ПРОСМОТРЕНО: 22 (пропущено по расширению: 0)
+САМОПРОВЕРКА ДЕТЕКТОРА: правила сработали — dnn, docs-backslash, docs-slash, res-content, res-sim, res-tests, review
+ДОКУМЕНТОВ ПАКЕТА НАЗВАНО: 8 — 00-task.md, 01-format.md, ...
+НАРУШЕНИЙ: 0
+ВЕРДИКТ: пакет самодостаточен — наружу ничего нашего не течёт (код 0)
+```
+
+Строка `САМОПРОВЕРКА ДЕТЕКТОРА` — не украшение: она называет правила, которые сработали на
+заведомо грязной строке внутри самого скрипта. Если проверка сломана, молчит она так же, как
+чистый пакет, — эта строка и отличает одно от другого.
+
+**Код возврата:** `0` — чисто; `1` — нарушения есть (напечатаны: файл, строка, правило);
+`2` — папка пакета не найдена (значит, комплект распакован отдельно; запусти из пакета).
+
+**Зачем это тебе.** Пакет обещает: наш репозиторий тебе не нужен. Ссылка на файл, которого
+у тебя нет, читается как «пакет дали неполный» — и это дефект пакета, а не твоя ошибка.
+Прогони `selfcheck.gd` и приложи его вывод к письму, если что-то нашлось: полный перечень
+правил — в комментарии к самому `selfcheck.gd`, там же сказано, что именно он смотрит.

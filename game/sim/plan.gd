@@ -5,7 +5,7 @@ extends RefCounted
 
 var route: Array = []              # id помещений по порядку
 var exit_node: String = ""         # куда выходим
-var exit_backup_node: String = ""  # запасной выход (D32): есть всегда
+var exit_backup_node: String = ""  # запасной выход: поле есть всегда (ядром пока не читается)
 var cargo_heavy: bool = false      # планируем вынос носителей (нужен Л2)
 var agents: Array = [
 	{"id": "kira", "role": "tactician", "understanding": 3},
