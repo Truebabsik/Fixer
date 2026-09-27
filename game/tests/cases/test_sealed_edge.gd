@@ -169,6 +169,81 @@ func run() -> Array:
 	two_doors.advance()
 	t.eq("второе окно на то же ребро не открывается", two_doors.current_window, null)
 
+	# 9. Агент, стоящий в УЗЛЕ ВЫХОДА, окно у запертой двери всё равно открывает.
+	# Это форма миссии 01: выход `hall0` — тот самый узел перед запертой дверью холодного
+	# зала, а `_actor_before_locked_edge` пропускал агента в `plan.exit_node` целиком,
+	# поэтому окно `w_archivist` не открывалось НИКОГДА, цель не бралась, и два
+	# прохождения из трёх не завершались (`reports/05-first-measurements.md` §9).
+	# Здесь выход — `mid`, то есть узел ПЕРЕД дверью `e_mid_goal`, а не за ней.
+	var at_exit = _make([{"type": "unlock", "edge": "e_mid_goal"}], {}, "door", 1, true, 1, "mid")
+	at_exit.advance()
+	t.eq("агент дошёл до узла выхода и упёрся в запертую дверь", at_exit.own[0].node, "mid")
+	t.eq("узел агента — и есть выход плана", at_exit.own[0].node, at_exit.plan.exit_node)
+	t.is_true("ребро к цели заперто", bool(at_exit.mission.edge("e_mid_goal")["locked"]))
+	t.is_true("окно открылось агенту в узле выхода", at_exit.current_window != null)
+	## Имя двери берём через охрану, а не ранним выходом: ранний `return` унёс бы с собой
+	## все ассерты ниже (в том числе блоки 10 и 11), и провал «окно не открылось» молча
+	## съедал бы половину проверок — ровно та форма, против которой стоит §4 `constraints.md`.
+	var at_exit_edge := ""
+	if at_exit.current_window != null:
+		at_exit_edge = String(at_exit.current_window["edge"])
+	t.eq("окно называет дверь к цели", at_exit_edge, "e_mid_goal")
+	t.is_true("приказ у двери принят", bool(at_exit.order("hack")["accepted"]))
+	at_exit.advance()
+	t.eq("после unlock агент прошёл дверь к цели", at_exit.own[0].node, "goal")
+	t.eq("цель взята", at_exit.result()["objective_done"], true)
+	at_exit.advance()
+	t.eq("и вернулся на выход", at_exit.own[0].node, "mid")
+	t.eq("миссия завершилась уходом", String(at_exit.result()["outcome"]), "extracted")
+
+	# 10. Маршрут, НАЧИНАЮЩИЙСЯ в узле выхода, окна «на старте» не открывает — вторая
+	# половина того же правила, и она проверяется отдельно: без неё снятие пропуска целиком
+	# сделало бы окно возможным на нулевом шаге любого маршрута, начинающегося в выходе.
+	var from_exit = _make_from_exit()
+	from_exit.advance()
+	## Сторож вырожденности: состояние агента — ровно то, на которое смотрит пропуск
+	## (первый узел маршрута, ни шага пути, стоит в выходе), и дверь заперта. Значит
+	## молчит именно пропуск, а не отсутствие повода.
+	t.eq("агент стоит в выходе", from_exit.own[0].node, "start")
+	t.eq("агент не сделал ни шага маршрута", from_exit.own[0].waypoint_index, 1)
+	t.eq("агент не начал переход", from_exit.own[0].progress, 0)
+	t.is_true("дверь на первом же ребре заперта", bool(from_exit.mission.edge("e_start_goal")["locked"]))
+	t.eq("окно на старте не открывается", from_exit.current_window, null)
+
+	# 11. Прямое ребро к выходу предпочтительнее обратного пути. Это форма ветки, которая
+	# сегодня ЕДИНСТВЕННАЯ завершается уходом: в миссии 01 вошедший в цель через грузовой
+	# лифт выходит через `hall0` — то есть НЕ тем путём, которым пришёл. Обратный путь без
+	# этого правила увёл бы группу наверх, к узлу входа, и миссия не зачлась бы.
+	var across = _make_across()
+	across.advance()
+	t.eq("цель взята с открытой стороны", across.own[0].node, "goal")
+	t.eq("выход — узел ЗА запертой дверью, а не тот, откуда пришли",
+		String(across.plan.exit_node), "mid")
+	## Сторож вырожденности: ребро «цель → выход» есть, значит применимо именно правило
+	## прямого ребра, а не обратный путь.
+	t.is_false("ребро «цель → выход» есть: правило 1 применимо",
+		across.mission.edge_between("goal", "mid").is_empty())
+	t.is_true("на пути к выходу окно у двери открылось", across.current_window != null)
+	## Без раннего выхода: если окно не открылось, провал виден ещё и остановкой группы
+	## в узле входа (assert ниже), а не только отсутствием окна.
+	t.is_true("приказ на выходе принят", bool(across.order("hack")["accepted"]))
+	across.advance()
+	t.eq("группа вышла через запертое прямое ребро", across.own[0].node, "mid")
+	t.eq("миссия с запертым выходом завершилась уходом", String(across.result()["outcome"]), "extracted")
+
+	# 11б. Та же форма, но прямое ребро к выходу НЕ заперто: путь домой обязан идти по нему,
+	# а не обратным путём. Здесь окна нет вовсе, поэтому провал правила 1 виден не окном, а
+	# остановкой группы в узле входа: «вышел» — это факт позиции, а не отсутствие окна.
+	var across_open = _make_across(false)
+	across_open.advance()
+	t.eq("цель взята и на открытом ребре", across_open.own[0].node, "goal")
+	t.eq("выход — узел ЗА целью и здесь", String(across_open.plan.exit_node), "mid")
+	t.eq("окон на открытом ребре нет", across_open.current_window, null)
+	across_open.advance()
+	t.eq("группа вышла через открытое прямое ребро", across_open.own[0].node, "mid")
+	across_open.advance()
+	t.eq("миссия с открытым выходом завершилась уходом", String(across_open.result()["outcome"]), "extracted")
+
 	return t.results
 
 
@@ -185,8 +260,12 @@ func run() -> Array:
 ## а не надеждой на автора. Второе и следующие окна получают свой id данных и свой
 ## вариант (`hack_2`): рантайм-id окон запертого ребра один и тот же (составной по ребру),
 ## а память по id считается от id данных — без этого «сработало первое» неотличимо.
+##
+## `exit_node` — куда выходит группа. Умолчание прежнее (`goal`), а не `mid`: иначе
+## сдвинулись бы все блоки выше, где выход равен цели, и кейс 9 проверял бы не форму
+## «выход — узел перед дверью», а случайный побочный эффект.
 func _make(option_effects: Array, silence_by_quality := {}, kind := "lift_main", steps := 1,
-		locked := false, windows_on_edge := 1):
+		locked := false, windows_on_edge := 1, exit_node := "goal"):
 	var m := Mission.new()
 	m.id = "sealed_edge"
 	m.add_node("start", 1, ["entry"])
@@ -205,7 +284,7 @@ func _make(option_effects: Array, silence_by_quality := {}, kind := "lift_main",
 	m.set_data({"windows": windows})
 	var p := Plan.new()
 	p.route = ["start", "mid", "goal"]
-	p.exit_node = "goal"
+	p.exit_node = String(exit_node)
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
 	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1, "noise_start": 25})
@@ -271,3 +350,51 @@ func _has(sim, type: String) -> bool:
 		if String(e["type"]) == type:
 			return true
 	return false
+
+
+## Маршрут, НАЧИНАЮЩИЙСЯ в узле выхода: `start` — и выход, и первый узел маршрута, а первое
+## же ребро заперто и открывается окном. Форма, ради которой пропуск агента в
+## `plan.exit_node` сужен до «маршрут ещё не начат», а не снят целиком.
+func _make_from_exit():
+	var m := Mission.new()
+	m.id = "from_exit"
+	m.add_node("start", 1, [])
+	m.add_node("goal", 1, [])
+	m.add_edge("e_start_goal", "start", "goal", "door", 1, 0, true)
+	m.objective = "goal"
+	m.set_data({"windows": [_window([{"type": "unlock", "edge": "e_start_goal"}], {}, "e_start_goal")]})
+	var p := Plan.new()
+	p.route = ["start", "goal"]
+	p.exit_node = "start"
+	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
+	var sim := Sim.new()
+	sim.setup(m, p, {"orders": 3, "seed": 1})
+	return sim
+
+
+## Цель с ДВУМЯ сторонами: пришли с открытой (`start`), а выход — за дверью (`mid`).
+## Форма ветки, которая в миссии 01 сегодня единственная завершается уходом: вошедший в цель
+## через грузовой лифт выходит не тем путём, которым пришёл.
+##
+## `locked` — заперта ли дверь к выходу. Запертая половина проверяет ещё и то, что окно на
+## обратном пути открывается агенту, стоящему в ЦЕЛИ (а не в выходе); открытая — что путь
+## домой вообще выбирает прямое ребро, а не разворот к узлу входа: окна там нет, и провал
+## правила виден остановкой группы, а не отсутствием окна.
+func _make_across(locked := true):
+	var m := Mission.new()
+	m.id = "across"
+	m.add_node("start", 1, [])
+	m.add_node("goal", 1, [])
+	m.add_node("mid", 1, [])
+	m.add_edge("e_start_goal", "start", "goal", "corridor", 1, 0)
+	m.add_edge("e_goal_mid", "goal", "mid", "door", 1, 0, bool(locked))
+	m.objective = "goal"
+	if locked:
+		m.set_data({"windows": [_window([{"type": "unlock", "edge": "e_goal_mid"}], {}, "e_goal_mid")]})
+	var p := Plan.new()
+	p.route = ["start", "goal"]
+	p.exit_node = "mid"
+	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
+	var sim := Sim.new()
+	sim.setup(m, p, {"orders": 3, "seed": 1})
+	return sim
