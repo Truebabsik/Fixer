@@ -20,14 +20,22 @@ const Mission := preload("res://sim/mission.gd")
 ## у ребра, которое закрывает тревога, получало бы `WINDOW_ON_OPEN_EDGE` — диагноз
 ## «сцены не будет» на сцене, которая есть.
 const Response := preload("res://sim/response.gd")
+## Применятель эффектов живёт в ядре — у него же спрашивается и СПИСОК видов эффектов
+## (`Sim.EFFECT_TYPES`, см. `EFFECT_TYPES` ниже). Свой перечень тут уже расходился
+## с ядром: `noop` форма принимала, а ядро его не называло вовсе.
+const Sim := preload("res://sim/sim.gd")
 
 ## `floors` и `facility_key` — поля ФОРМЫ ПРЕЗЕНТАЦИИ: экран операции рисует схему этажа
 ## с подписями помещений, а взять их неоткуда (что нужно уровню, чтобы его можно было
 ## нарисовать, — `01-format.md` §12).
 ## Оба НЕобязательны: уровень без координат, подписей и этажей обязан оставаться валидным
 ## и грузиться — это условие приёмки формы, а не пожелание (кейс 15а).
+## `routes` — раздел НОРМАТИВНЫХ маршрутов уровня (форма v3): замысел прохождения данными,
+## а не словами в отчёте. `access_points` из списка УБРАН (форма v3): ядро этот раздел не
+## исполняет вовсе, и форма не имеет права его принимать — иначе уровень обещает механику,
+## которой нет. Действие у терминала выражается вариантом окна (`money`/`trace`/`mark`).
 const ROOT_KEYS := ["id", "title_key", "nodes", "edges", "patrols", "sensors",
-	"objective", "windows", "intel", "access_points", "floors", "facility_key", "note"]
+	"objective", "windows", "intel", "routes", "floors", "facility_key", "note"]
 ## `pos` и `name_key` — та же форма презентации на узле: координаты помещения на схеме
 ## этажа и ключ подписи (`room.<node_id>`, значение — в текстах). Оба необязательны.
 const NODE_KEYS := ["floor", "tags", "pos", "name_key", "note"]
@@ -52,17 +60,23 @@ const EFFECT_KEYS := ["type", "edge", "value", "id", "want", "needs", "fallback"
 const INTEL_KEYS := ["channel", "observed_at", "entries", "note"]
 const INTEL_ENTRY_KEYS := ["kind", "id", "route", "period", "nodes", "node", "count",
 	"age_hours", "false", "note_key", "note"]
-const POINT_KEYS := ["id", "node", "kind", "text_key", "trace_key", "actions", "note"]
-const ACTION_KEYS := ["id", "text_key", "complexity", "cost", "effects", "note"]
+## Разрешённые поля нормативного маршрута уровня: `id`, вход, выход, список помещений.
+## Список закрыт: раздел читает инструмент приёмки и человек, и опечатка в имени
+## поля («path» вместо «route») обязана назваться `UNKNOWN_KEY`, а не выглядеть как
+## «маршрута нет».
+const ROUTE_KEYS := ["id", "entry", "exit", "route", "note"]
 
 ## Разделы-массивы: обязательны на корне (см. `01-format.md` §1), но пустой массив —
 ## нормальная миссия. «Ключа нет» и «ключ есть, но не массив» — разные болезни.
 ##
 ## Держать в согласии с `Mission.DATA_ARRAY_SECTIONS` (`sim/mission.gd`): там перечислено,
 ## какие разделы модель миссии вообще принимает в `data`. Списки НЕ совпадают дословно —
-## здесь все шесть корневых массивов файла (`edges`, `patrols`, `sensors` ядру в `data` не
+## здесь все семь корневых массивов файла (`edges`, `patrols`, `sensors` ядру в `data` не
 ## едут, они у него в жёстком API), — но новая секция обязана появиться в обоих.
-const ARRAY_SECTIONS := ["edges", "patrols", "sensors", "windows", "intel", "access_points"]
+## `routes` стоит здесь, а не среди необязательных полей НЕ случайно: раздел обязателен
+## (форма v3), и «маршрутов нет» — не «уровень без маршрутов», а дефект: норматив «окон за
+## прохождение» иначе нечем измерить.
+const ARRAY_SECTIONS := ["edges", "patrols", "sensors", "windows", "intel", "routes"]
 ## Обязательные корневые поля, кроме разделов: id миссии и ключ её названия.
 const REQUIRED_ROOT_STRINGS := ["id", "title_key"]
 ## Вид окна и тип триггера — ОДИН список: `kind` обязан совпадать с `trigger.type`
@@ -72,8 +86,13 @@ const REQUIRED_ROOT_STRINGS := ["id", "title_key"]
 ## проверки окна читается «вид окна», в месте триггера — «тип триггера».
 const TRIGGER_TYPES := ["locked_edge", "node_entered", "guard_in_sensor"]
 const WINDOW_KINDS := TRIGGER_TYPES
-## Виды эффектов, известные ядру. Всё остальное — только через engine_proposal.
-const EFFECT_TYPES := ["unlock", "noise", "delay", "noop", "engine_proposal", "money", "trace"]
+## Виды эффектов, известные ядру. Список СПРАШИВАЕТСЯ у применятеля (`Sim.EFFECT_TYPES`),
+## а не переписывается здесь: вторая копия разошлась бы с ядром молча, и форма принимала бы
+## эффект, которого никто не исполняет (так уже было с `noop`). Всё остальное — только через
+## `engine_proposal`. `money`/`trace` — счётчики, `mark` — именованная метка: «Итоги» (П2)
+## читают именно их, а ось «копия против оригинала» выражается выбором игрока (меткой), а не
+## перевозкой носителей. Требования к полям у каждого свои и разобраны в `_check_effects`.
+const EFFECT_TYPES := Sim.EFFECT_TYPES
 const POINT_KINDS := ["terminal", "door_panel", "camera", "climate"]
 const INTEL_KINDS := ["patrol", "sensor", "guard_count", "door_state"]
 ## Каналы разведки: единственный подброшенный пункт живёт у агентуры (см. ниже), и это имя
@@ -203,10 +222,24 @@ static func validate(data, texts) -> Array:
 	_check_patrols(data, nodes, problems)
 	_check_sensors(data, nodes, problems)
 	_check_objective(data, nodes, problems)
-	_check_reachability(data, nodes, problems)
-	_check_windows(data, _known_edges(data), _known_ids(data, "sensors"), _known_ids_from(nodes), problems)
-	_check_intel(data, _known_ids(data, "patrols"), problems)
-	_check_access_points(data, nodes, _known_ids(data, "edges"), problems)
+	var entries := _entry_nodes(nodes)
+	var known_edges := _known_edges(data)
+	var known_sensors := _known_ids(data, "sensors")
+	var known_patrols := _known_ids(data, "patrols")
+	## `entries` (узлы с тегом `entry`) нужны сразу нескольким проверкам: нормативным
+	## маршрутам (форма v3 — ровно один маршрут на вход), достижимости цели, обоим диагнозам
+	## «окно невозможно» про вход и недостижимый якорь ГРУППОВОГО окна (`node_entered`,
+	## `locked_edge`; у `guard_in_sensor` актёр — охрана, см. `_window_anchors`). Считается
+	## ОДИН раз: второй обход `nodes` разошёлся бы с первым молча.
+	_check_routes(data, nodes, entries, problems)
+	_check_reachability(data, nodes, known_edges, entries, problems)
+	_check_windows(data, known_edges, known_sensors, _known_ids_from(nodes), entries,
+		_patrolled_nodes(data), problems)
+	_check_window_reachability(data, known_edges, _known_ids_from(nodes),
+		entries, problems)
+	## `_patrol_data` — маршрут и период КАЖДОГО патруля: по ним решается, расходится ли
+	## с реальностью подброшенное расписание (`GHOST_SAME_AS_REAL`).
+	_check_intel(data, known_patrols, _patrol_data(data), problems)
 	## Третье состояние второго аргумента (см. контракт `validate` выше). Проверка стоит
 	## здесь, а не в `_check_texts`, потому что это форма АРГУМЕНТА, как и `(корень)` выше:
 	## `_check_texts` отвечает на вопрос «что в текстах против данных», и внутрь него
@@ -262,23 +295,53 @@ static func _known_ids_from(items: Dictionary) -> Dictionary:
 	return out
 
 
-## Множество id раздела — для проверки ссылок на него.
+## id раздела → САМА запись, а не `true`. Ссылочные проверки спрашивают только `has`, и
+## для них разницы нет; но «окно не сработает: зону сенсора не посещает ни один патруль»
+## обязано назвать САМИ помещения зоны — а взять их можно только из записи сенсора.
+## Второй сборки того же словаря «id → запись» здесь не заводим: она разошлась бы с первой
+## молча (тем же дефектом, против которого стоят `TRIGGER_TYPES`/`WINDOW_KINDS`).
 static func _known_ids(data: Dictionary, section: String) -> Dictionary:
 	var out := {}
 	if not data.has(section) or typeof(data[section]) != TYPE_ARRAY:
 		return out
 	for item in data[section]:
 		if typeof(item) == TYPE_DICTIONARY and item.has("id"):
-			out[String(item["id"])] = true
+			out[String(item["id"])] = item
 	return out
 
 
-## id ребра → сведения о ребре, нужные проверкам окон: `locked` КАК ЕСТЬ и `kind`
-## строкой. Не приведённый к `bool` `locked` и не `true`.
+## Помещения зоны сенсора по его id — для сообщения о мёртвом сенсоре. Пустой список у
+## несуществующего сенсора и у испорченного поля `nodes`: о них уже сказано своим диагнозом
+## (`BAD_REF`, `WRONG_TYPE`), и падать на них валидатор не имеет права.
+static func _sensor_nodes(sensor: String, known_sensors: Dictionary) -> Array:
+	var out: Array = []
+	if not known_sensors.has(sensor):
+		return out
+	var record = known_sensors[sensor]
+	if typeof(record) != TYPE_DICTIONARY:
+		return out
+	var nodes = (record as Dictionary).get("nodes", null)
+	if typeof(nodes) != TYPE_ARRAY:
+		return out
+	for node in (nodes as Array):
+		if typeof(node) == TYPE_STRING:
+			out.append(String(node))
+	return out
+
+
+## id ребра → сведения о ребре, нужные проверкам окон: `locked` КАК ЕСТЬ, `kind`
+## строкой и ОБА КОНЦА. Не приведённый к `bool` `locked` и не `true`.
 ##
-## Проверкам окон нужны ЧЕТЫРЕ ответа про одно и то же ребро: существует ли ссылка (`has`),
-## заперто ли оно (`true`), «поле испорчено — судить нельзя» (не-bool) и «перекрывается
-## ли оно тревогой» (`kind`). Приведение `locked` здесь и было бы дефектом: `bool("да")` —
+## Проверкам окон нужны ПЯТЬ ответов про одно и то же ребро: существует ли ссылка (`has`),
+## заперто ли оно (`true`), «поле испорчено — судить нельзя» (не-bool), «перекрывается
+## ли оно тревогой» (`kind`) и ДОСТИЖИМЫ ЛИ ЕГО КОНЦЫ — якорь окна у ребра это ребро
+## целиком, и без `a`/`b` в записи «якорь недостижим» у окна у двери не проверялся бы
+## вовсе (проверено пробой: диагноз не выдавался ни на одном входе). Читать концы из
+## самого файла вторым обходом (`data["edges"]`) значило бы держать два ответа на один
+## вопрос в двух местах — ровно тот класс, против которого стоят `TRIGGER_TYPES` и
+## `Response.blockable_kind`.
+##
+## Приведение `locked` здесь и было бы дефектом: `bool("да")` —
 ## не существующий конструктор (рантайм-сбой движка), `bool(1)` — тихая истина, то есть
 ## мусор превращался бы в уверенное «заперто». `kind` берётся через `str`, а не `String`:
 ## значение приходит из данных и может быть словарём, а конструктор `String` на нём падает
@@ -294,6 +357,8 @@ static func _known_edges(data: Dictionary) -> Dictionary:
 			out[String(e["id"])] = {
 				"locked": e.get("locked", false),
 				"kind": str(e.get("kind", "")),
+				"a": str(e.get("a", "")),
+				"b": str(e.get("b", "")),
 			}
 	return out
 
@@ -311,10 +376,11 @@ static func _check_root_keys(data: Dictionary, problems: Array) -> void:
 		else:
 			_expect_type(data[name], required[1], name, problems)
 	## `facility_key` — НЕобязательное корневое поле (ключ названия комплекса). Тип
-	## проверяется по факту поля, как у `trace_key` точки доступа: без этой проверки
-	## испорченное поле молча выпадает из сбора текстовых ключей (`_walk_text_keys` берёт
-	## только строки), и текст, на который оно ссылалось, объявляется висячим — автор
-	## получает `DANGLING_TEXT` про текст, которого не терял, не видя кривого поля.
+	## проверяется по факту поля, как у остальных текстовых ключей (`_check_text_key`): без
+	## этой проверки испорченное поле молча выпадает из сбора текстовых ключей
+	## (`_walk_text_keys` берёт только строки), и текст, на который оно ссылалось,
+	## объявляется висячим — автор получает `DANGLING_TEXT` про текст, которого не терял,
+	## не видя кривого поля.
 	if data.has("facility_key"):
 		_string_or(data["facility_key"], "facility_key", problems)
 
@@ -337,9 +403,15 @@ static func _check_nodes(data: Dictionary, problems: Array) -> Dictionary:
 			problems.append(Problems.missing_field("%s.floor" % path, TYPE_INT))
 		else:
 			_expect_int(node["floor"], "%s.floor" % path, problems)
+		## Теги узла — свободный список строк, и перечня допустимых имён у формы НЕТ
+		## намеренно: тег читает ядро по имени, а не по списку. `entry` — вход группы,
+		## `shielded` — экранированное помещение, где глохнет голос; остальные
+		## (`stair`, `lift_main`, `terminal`, `server`, …) — подписи для презентации.
+		## Поэтому проверяется ФОРМА (массив строк), а не значение: закрытый перечень
+		## отверг бы честный новый тег и заставил бы править валидатор ради данных.
 		if node.has("tags"):
 			_check_string_array(node["tags"], "%s.tags" % path, problems)
-		## Поля презентации — по факту наличия, как у `trace_key`: `pos` НЕобязателен, но
+		## Поля презентации — по факту наличия, как `name_key` ниже: `pos` НЕобязателен, но
 		## если он есть, то обе оси обязательны и целые; `name_key` — ключ подписи, и его
 		## тип проверяется тем же способом, что у остальных текстовых ключей.
 		if node.has("pos"):
@@ -351,7 +423,7 @@ static func _check_nodes(data: Dictionary, problems: Array) -> Dictionary:
 
 ## Координаты помещения на схеме этажа: `{"x": <целое>, "y": <целое>}`.
 ##
-## Проверка идёт по ФАКТУ поля (как у `trace_key`), и внутри — по обеим осям сразу:
+## Проверка идёт по ФАКТУ поля (`pos` необязателен), и внутри — по обеим осям сразу:
 ## `{"x": 5}` без `y` — это не «координата наполовину», а неполная форма, и назвать её
 ## обязан `MISSING_FIELD` на своей оси. Отрицательные значения законны: схема этажа
 ## может быть разложена и в отрицательную сторону, поэтому `BAD_VALUE` здесь не бывает.
@@ -611,7 +683,17 @@ static func _check_objective(data: Dictionary, nodes: Dictionary, problems: Arra
 ## пути нет). Два сообщения на один разрыв — осознанно: это разные диагнозы, «от входа
 ## до цели не дойти» и «от цели не вернуться к входу», и контент может чинить их разными
 ## правками. При равенстве путей (обычный случай) обе проверки молчат.
-static func _check_reachability(data: Dictionary, nodes: Dictionary, problems: Array) -> void:
+##
+## Третье правило — про РЕБРО, а не про помещение: якорь окна с триггером `locked_edge`
+## обязан быть достижим от входов. Прежде оно проверялось только для помещений, и окно
+## у ребра в отрезанной части графа проходило форму молча. Строка ребра читается из
+## `known_edges` (того же словаря, что у окон): второй его сборки здесь не заводим, иначе
+## «ребро есть» в двух местах могло бы значить разное.
+##
+## `entries` приходит аргументом, а не считается здесь: список входов уже построен
+## вызывающим, и второй обход `nodes` разошёлся бы с первым молча.
+static func _check_reachability(data: Dictionary, nodes: Dictionary, known_edges: Dictionary,
+		entries: Array, problems: Array) -> void:
 	if nodes.is_empty() or not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
 		return
 	if not data.has("objective") or typeof(data["objective"]) != TYPE_STRING:
@@ -619,7 +701,6 @@ static func _check_reachability(data: Dictionary, nodes: Dictionary, problems: A
 	var objective := String(data["objective"])
 	if not nodes.has(objective):
 		return
-	var entries := _entry_nodes(nodes)
 	if entries.is_empty():
 		problems.append(Problems.unreachable("nodes", "нет ни одного помещения с тегом entry — группу некуда ставить"))
 		return
@@ -638,12 +719,250 @@ static func _check_reachability(data: Dictionary, nodes: Dictionary, problems: A
 			"от цели «%s» не дойти ни до одного входа: %s" % [objective, ", ".join(entries)]))
 
 
+## Достижимые от входов помещения ОДНИМ обходом. Отвечает на вопрос «можно ли вообще
+## попасть в это помещение от какого-нибудь входа», а не «каким путём»: путь — замысел
+## уровня, и он объявлен разделом `routes`, а не выводится валидатором.
+##
+## Словарь-множество (а не список) потому, что спрашивают его по каждому якорю окна:
+## поиск по списку на каждом окне — та же работа, только медленнее и незаметнее.
+static func _reachable_from_entries(entries: Array, edges: Array) -> Dictionary:
+	var seen: Dictionary = {}
+	var queue: Array = []
+	for entry in entries:
+		var id := String(entry)
+		if not seen.has(id):
+			seen[id] = true
+			queue.append(id)
+	while not queue.is_empty():
+		var current := String(queue.pop_front())
+		for e in edges:
+			if typeof(e) != TYPE_DICTIONARY:
+				continue
+			var a := String(e.get("a", ""))
+			var b := String(e.get("b", ""))
+			var next := ""
+			if a == current:
+				next = b
+			elif b == current:
+				next = a
+			if next != "" and not seen.has(next):
+				seen[next] = true
+				queue.append(next)
+	return seen
+
+
+## Помещения, через которые ходит хотя бы один патруль: ОБЪЕДИНЕНИЕ маршрутов. По этому
+## множеству решается, бывает ли охрана в зоне сенсора вообще.
+##
+## Именно объединение, а не «маршрут одного патруля»: ядро выдаёт `sensor_contact`, когда
+## ЛЮБОЙ охранник входит в зону, и второй патруль через ту же зону окно оживляет. Множество
+## узлов, а не список, — по той же причине, что и у `_reachable_from_entries`: спрашивают
+## его на каждом окне с сенсором.
+static func _patrolled_nodes(data: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	if not data.has("patrols") or typeof(data["patrols"]) != TYPE_ARRAY:
+		return out
+	for p in (data["patrols"] as Array):
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var route = p.get("route", null)
+		if typeof(route) != TYPE_ARRAY:
+			continue
+		for node in (route as Array):
+			if typeof(node) == TYPE_STRING:
+				out[String(node)] = true
+	return out
+
+
+## Маршрут и период КАЖДОГО патруля по id: по ним проверяется, расходится ли с реальностью
+## подброшенное расписание (`GHOST_SAME_AS_REAL`). Форма полей здесь не судится —
+## её уже назвали `_check_patrols`; словарь отвечает только на вопрос «а как на самом деле».
+static func _patrol_data(data: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	if not data.has("patrols") or typeof(data["patrols"]) != TYPE_ARRAY:
+		return out
+	for p in (data["patrols"] as Array):
+		if typeof(p) != TYPE_DICTIONARY or not p.has("id"):
+			continue
+		out[String(p["id"])] = {
+			"route": p.get("route", []),
+			"period": p.get("period", null),
+		}
+	return out
+
+
 static func _entry_nodes(nodes: Dictionary) -> Array:
 	var out: Array = []
 	for node_id in nodes:
 		var tags = nodes[node_id].get("tags", [])
 		if typeof(tags) == TYPE_ARRAY and (tags as Array).has("entry"):
 			out.append(String(node_id))
+	return out
+
+
+# --- нормативные маршруты -----------------------------------------------------
+
+## `routes` — ОБЯЗАТЕЛЬНЫЙ раздел: «ровно один маршрут на каждый узел с тегом entry».
+## Прежде норматив «8–9 срабатывающих окон за прохождение» нечем было измерить: маршрутов
+## в данных не было, приёмка строила свои (BFS от входа к цели), и спор «9/9/8 против 5/6/7»
+## не имел арбитра. Теперь замысел прохождения объявлен ДАННЫМИ, а BFS остаётся тем, чем и
+## должен быть, — способом показать, что каждое окно вообще способно сработать.
+##
+## Проверок здесь шесть, и каждая называет СВОЁ: раздела нет; он не массив; записей про
+## вход не ровно одна; `entry`/`exit` — не вход; `route[0]`/`route[-1]` не совпали с
+## `entry`/`exit`; соседние точки маршрута не соединены ребром; цель не лежит на маршруте.
+## Разные правки у автора — разные диагнозы (принцип шапки файла).
+##
+## Каскад гасится там, где он был бы вторым следствием одной ошибки: покрытие входов
+## считается только по маршрутам, у которых список помещений ЧИТАЕТСЯ (массив строк), а
+## «цель на маршруте» и «соседние пары» — только по тем, у которых он непуст. Иначе
+## `route: "не массив"` давал бы ещё и «вход не обслужен», и «цель не на маршруте» —
+## три диагноза на одну опечатку в типе.
+##
+## `entries` — узлы с тегом `entry` (считаны вызывающим). Пустой список сюда доходит
+## свободно: «нет ни одного входа» уже названо `_check_reachability` кодом `UNREACHABLE`,
+## и второго диагноза про то же мы не выписываем.
+static func _check_routes(data: Dictionary, nodes: Dictionary, entries: Array, problems: Array) -> void:
+	if not data.has("routes") or typeof(data["routes"]) != TYPE_ARRAY:
+		return
+	var duplicates := _duplicate_ids(data["routes"])
+	if not duplicates.is_empty():
+		problems.append(Problems.duplicate_id("routes", String(duplicates[0])))
+	## Цель считается ОДИН раз: она не зависит от маршрута, а спрашивают её в цикле.
+	## Нечитаемое поле даёт пустую строку — о нём уже сказано своим диагнозом, и второго
+	## следствия («цель не на маршруте») на испорченное поле мы не выписываем.
+	var objective := _objective_of(data)
+	var starts: Dictionary = {}
+	for i in (data["routes"] as Array).size():
+		var entry_def = data["routes"][i]
+		var path := "routes[%d]" % i
+		if typeof(entry_def) != TYPE_DICTIONARY:
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(entry_def)))
+			continue
+		var route_def: Dictionary = entry_def
+		_check_keys(route_def, ROUTE_KEYS, path, problems)
+		var label := _string_or(route_def.get("id", ""), "%s.id" % path, problems)
+		if label == "":
+			## Имени у маршрута нет — называть его дальше нечем, остаётся индекс.
+			## Прежний `Path` структуры не меняется, и это тот же приём, что у окна без id.
+			label = path
+		var entry_node := _string_or(route_def.get("entry", ""), "%s.entry" % path, problems)
+		var exit_node := _string_or(route_def.get("exit", ""), "%s.exit" % path, problems)
+		## Вход и выход — узлы с тегом `entry`: в MVP выходом служит один из
+		## входов («уходишь тем путём, каким вошёл»). Отдельного выхода уровень не объявляет,
+		## и молчаливое расширение формы здесь недопустимо.
+		##
+		## Ссылка проверяется по СПИСКУ входов, а не по `nodes`: узел, существующий без тега
+		## `entry`, — такой же дефект, как несуществующий, и сообщение обязано назвать
+		## причину. Имена `nodes` и `entries` тут различаются: первое — «такого помещения
+		## нет», второе — «оно есть, но это не вход».
+		if entry_node != "" and not nodes.is_empty() and not nodes.has(entry_node):
+			problems.append(Problems.bad_ref("%s.entry" % path, "нет помещения «%s»" % entry_node))
+		elif entry_node != "" and not entries.is_empty() and not entries.has(entry_node):
+			problems.append(Problems.route_end_not_entry("%s.entry" % path, entry_node, "вход"))
+		if exit_node != "" and not nodes.is_empty() and not nodes.has(exit_node):
+			problems.append(Problems.bad_ref("%s.exit" % path, "нет помещения «%s»" % exit_node))
+		elif exit_node != "" and not entries.is_empty() and not entries.has(exit_node):
+			problems.append(Problems.route_end_not_entry("%s.exit" % path, exit_node, "выход"))
+		## Покрытие входов — ТОЛЬКО по маршрутам с честным `entry`: у маршрута без входа
+		## корень уже назван, и второй диагноз («этот вход не обслужен») был бы следствием.
+		if entry_node != "" and entries.has(entry_node):
+			starts[entry_node] = int(starts.get(entry_node, 0)) + 1
+		if not route_def.has("route"):
+			problems.append(Problems.missing_field("%s.route" % path, TYPE_ARRAY))
+			continue
+		var list: Variant = _string_array_or(route_def["route"], "%s.route" % path, problems)
+		if list == null:
+			continue
+		var route: Array = list
+		if route.is_empty():
+			problems.append(Problems.bad_value("%s.route" % path,
+				"маршрут пуст: `route[0]` обязан быть входом, а `route[-1]` — выходом"))
+			continue
+		## Концы списка обязаны совпасть с объявленными `entry`/`exit`: иначе маршрут —
+		## не тот, что объявлен, и норматив считается не по тому прохождению.
+		if entry_node != "" and String(route[0]) != entry_node:
+			problems.append(Problems.bad_value("%s.route" % path,
+				"маршрут начинается с «%s», а объявленный вход — «%s»" % [String(route[0]), entry_node]))
+		var last := route.size() - 1
+		if exit_node != "" and String(route[last]) != exit_node:
+			problems.append(Problems.bad_value("%s.route" % path,
+				"маршрут кончается на «%s», а объявленный выход — «%s»" % [String(route[last]), exit_node]))
+		## Соседние точки обязаны быть соединены ребром: маршрут — это прохождение по
+		## РЁБРАМ графа. Разрыв означает, что объявленный проход невыполним, и норматив
+		## посчитан по несуществующему пути.
+		var size := route.size()
+		for k in max(0, size - 1):
+			if not _connected(String(route[k]), String(route[k + 1]), data):
+				problems.append(Problems.bad_value("%s.route" % path,
+					"разрыв маршрута: «%s» и «%s» не соединены ребром"
+					% [String(route[k]), String(route[k + 1])]))
+		## Цель обязана лежать на маршруте: норматив «окон за прохождение» считается по
+		## проходам, которые к цели ВЕДУТ.
+		if objective != "" and not route.has(objective):
+			problems.append(Problems.objective_off_route(label, objective))
+	## Ровно один маршрут на вход — и каждый вход обслужен ровно раз. Считается
+	## по полю `entry` (счёт `starts[entry_node]` выше — там же, где проверено, что
+	## `entry` действительно вход), а не по числу записей: запись с чужим `entry` вход
+	## не обслуживает, и объявить два маршрута с одним входом нельзя — «ровно один».
+	if entries.is_empty():
+		return
+	var missing: Array = []
+	var repeated: Array = []
+	for entry_node in entries:
+		var count := int(starts.get(String(entry_node), 0))
+		if count == 0:
+			missing.append(String(entry_node))
+		elif count > 1:
+			repeated.append("%s (%d)" % [String(entry_node), count])
+	if not missing.is_empty():
+		problems.append(Problems.routes_per_entry("routes", "нет маршрута для входа: %s" % ", ".join(missing)))
+	if not repeated.is_empty():
+		problems.append(Problems.routes_per_entry("routes", "больше одного маршрута у входа: %s" % ", ".join(repeated)))
+
+
+## Цель миссии строкой или пустая строка, если поле не читается: о нечитаемом поле уже
+## сказано (`WRONG_TYPE`/`MISSING_FIELD` в `_check_root_keys`/`_check_objective`), а
+## валидатор падать не имеет права.
+static func _objective_of(data: Dictionary) -> String:
+	if not data.has("objective") or typeof(data["objective"]) != TYPE_STRING:
+		return ""
+	return String(data["objective"])
+
+
+## Список помещений одной строкой — для СООБЩЕНИЙ (маршрут призрака, названный в диагнозе).
+## Это не путь в файле: путь у проблемы свой, а здесь автору нужно узнать, С ЧЕМ совпало
+## подброшенное расписание. Значения приводятся `str`, а не `String(...)`: конструктор
+## `String` на Variant падает рантаймом, а сюда попадает что угодно из данных.
+static func _route_text(route) -> String:
+	if typeof(route) != TYPE_ARRAY:
+		return str(route)
+	var parts: Array = []
+	for item in (route as Array):
+		parts.append(str(item))
+	return " → ".join(parts)
+
+
+## Повторяющиеся id внутри раздела-массива. Возвращает список повторов в порядке
+## появления — или пустой. Отдельная функция на один вызывающий (`_check_routes`):
+## правило «id уникален» есть и у других разделов, но там оно записано на месте, в цикле,
+## где id уже разбирается по типу; сюда вынесена только та проверка, чей раздел читается
+## целиком и заранее. Общей функции «для всех разделов» здесь нет — это был бы второй
+## проход по данным и второе место, где про id сказано разное.
+static func _duplicate_ids(section) -> Array:
+	var out: Array = []
+	if typeof(section) != TYPE_ARRAY:
+		return out
+	var seen: Dictionary = {}
+	for item in (section as Array):
+		if typeof(item) != TYPE_DICTIONARY or not item.has("id"):
+			continue
+		var id := str(item["id"])
+		if seen.has(id):
+			if not out.has(id):
+				out.append(id)
+		else:
+			seen[id] = true
 	return out
 
 
@@ -688,7 +1007,7 @@ static func _connected(a: String, b: String, data: Dictionary) -> bool:
 
 
 static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sensors: Dictionary,
-		known_nodes: Dictionary, problems: Array) -> void:
+		known_nodes: Dictionary, entries: Array, patrolled: Dictionary, problems: Array) -> void:
 	if not data.has("windows") or typeof(data["windows"]) != TYPE_ARRAY:
 		return
 	var seen: Array = []
@@ -727,7 +1046,8 @@ static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sens
 			if kind != "" and not WINDOW_KINDS.has(kind):
 				problems.append(Problems.bad_value("%s.kind" % path,
 					"неизвестный вид окна «%s», допустимы: %s" % [kind, ", ".join(WINDOW_KINDS)]))
-		var trigger := _check_trigger(w, wid, known_edges, known_sensors, known_nodes, problems)
+		var trigger := _check_trigger(w, wid, known_edges, known_sensors, known_nodes, entries,
+			patrolled, problems)
 		var trigger_type := String(trigger["type"])
 		## `kind` обязан совпадать с `trigger.type`. Сам по себе `kind` вид окна не задаёт:
 		## рантайм-форму ядро собирает из `trigger.type`, а `kind`
@@ -744,10 +1064,122 @@ static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sens
 		_check_silence(w, wid, trigger_type, String(trigger["edge"]), known_edges, problems)
 
 
+## ЯКОРЬ ОКНА ГРУППЫ ОБЯЗАН БЫТЬ ДОСТИЖИМ ОТ ВХОДОВ.
+##
+## Правило проверяет то, чего не видит ни одна проверка выше: окно можно поставить в части
+## графа, куда группа не попадёт НИКОГДА. Прогон такое окно ловит только если построенный
+## маршрут через его якорь вообще доходит до цели, а форма обязана не пускать дефект в
+## работу — приёмка v2 нашла это прогоном именно потому, что статически не называл никто.
+##
+## Правило СУДИТ ТОЛЬКО ОКНА ГРУППЫ — те, чей актёр приходит в якорь от входа:
+##  * `node_entered` — помещение: группа обязана уметь в него войти;
+##  * `locked_edge` — ребро: это отдельная проверка, а не вывод из «оба конца достижимы».
+##    Ребро между двумя недостижимыми помещениями недостижимо, даже если граф связен
+##    «где-то ещё», и обратное тоже верно — вывод из помещений здесь был бы догадкой.
+##
+## Окно `guard_in_sensor` сюда НЕ попадает, и это не пропуск. Его актёр — ОХРАНА, а охрана
+## СТАРТУЕТ на своём маршруте (`sim.gd:setup` ставит её в `patrols[].route[0]`) и ходит по
+## нему, не приходя от входов вовсе: крыло, отрезанное от входов, но со своим патрулём и
+## сенсором, — законный уровень, и окно там срабатывает с первого шага. Недостижимость
+## «от входов» к этому актёру неприменима; про сенсор, которого не касается НИ ОДИН патруль,
+## говорит своё правило — `WINDOW_ON_UNVISITED_SENSOR` (`_check_trigger`). Прежняя редакция
+## считала якорями зоны сенсора и отвергала такой уровень зря.
+##
+## Обход один на все окна (множество достижимых помещений считается ОДИН раз), но диагноз
+## выписывается НА ОКНО: автору нужно окно, а не список помещений.
+##
+## Что сюда НЕ доходит:
+##  * испорченный или неизвестный триггер — корень назван (`WRONG_TYPE`, `BAD_VALUE`);
+##  * ссылка на несуществующий узел/ребро — корень назван (`BAD_REF`);
+##  * миссия без рёбер или без входов — о входах говорит `_check_reachability`
+##    (`UNREACHABLE`), и «якорь недостижим» было бы вторым следствием того же.
+static func _check_window_reachability(data: Dictionary, known_edges: Dictionary,
+		known_nodes: Dictionary, entries: Array, problems: Array) -> void:
+	if not data.has("windows") or typeof(data["windows"]) != TYPE_ARRAY:
+		return
+	if entries.is_empty() or not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
+		return
+	var reachable := _reachable_from_entries(entries, data["edges"])
+	for i in (data["windows"] as Array).size():
+		var w = data["windows"][i]
+		if typeof(w) != TYPE_DICTIONARY:
+			continue
+		var wid := str(w.get("id", ""))
+		if wid == "":
+			wid = "windows[%d]" % i
+		for anchor in _window_anchors(w, known_edges, known_nodes):
+			if reachable.has(String(anchor["node"])):
+				continue
+			## Одно окно — один диагноз: у окна у ребра недостижимых концов может быть
+			## два, но правка у автора одна (соединить якорь с графом).
+			problems.append(Problems.window_on_unreachable_node(wid, String(anchor["what"])))
+			break
+
+
+## Якоря окна ГРУППЫ: список `{"node", "what"}`, где `node` — помещение графа, от которого
+## зависит срабатывание, а `what` — словами, чем этот якорь является в окне (для сообщения).
+##
+## Пустой список — «судить не о чем»: триггера нет или он не той формы, ссылка не строка,
+## объекта нет в миссии. Все эти случаи уже названы своими диагнозами, и второго следствия
+## на них не выписываем. Рёбра разворачиваются в ОБА конца: ребро существует между двумя
+## помещениями, и недостижим любой из них — окно не сработает.
+##
+## `guard_in_sensor` возвращает пустой список ВСЕГДА: актёр этого окна — охрана, и её
+## приход в зону от входов не зависит (см. шапку `_check_window_reachability`). Молчание
+## здесь не «проверка не сработала», а «этому актёру данное правило не адресовано»:
+## о мёртвом сенсоре говорит `WINDOW_ON_UNVISITED_SENSOR`.
+static func _window_anchors(w: Dictionary, known_edges: Dictionary,
+		known_nodes: Dictionary) -> Array:
+	var out: Array = []
+	var trigger = w.get("trigger", null)
+	if typeof(trigger) != TYPE_DICTIONARY:
+		return out
+	var trigger_dict: Dictionary = trigger
+	if typeof(trigger_dict.get("type", null)) != TYPE_STRING:
+		return out
+	var type := String(trigger_dict["type"])
+	match type:
+		"node_entered":
+			var node = trigger_dict.get("node", null)
+			if typeof(node) == TYPE_STRING and known_nodes.has(String(node)):
+				out.append({"node": String(node), "what": "помещение «%s»" % String(node)})
+		"guard_in_sensor":
+			## Актёр этого окна — охрана, и её приход в зону от входов не зависит: якоря
+			## группы у него нет вовсе (шапка `_window_anchors`).
+			return out
+		"locked_edge":
+			var edge = trigger_dict.get("edge", null)
+			if typeof(edge) != TYPE_STRING or not known_edges.has(String(edge)):
+				return out
+			var record = known_edges[String(edge)]
+			if typeof(record) == TYPE_DICTIONARY:
+				## `a`/`b` читаются из записи ребра: второй сборки «id → концы» не заводим.
+				for side in ["a", "b"]:
+					var end = (record as Dictionary).get(side, null)
+					if typeof(end) == TYPE_STRING and known_nodes.has(String(end)):
+						out.append({"node": String(end), "what": "ребро «%s»" % String(edge)})
+	return out
+
+
 ## Разбор триггера. Возвращает его вид и ребро (пустая строка, если ребра нет):
 ## вид нужен проверке молчания, ребро — проверке выполнимости окна у двери.
+##
+## Здесь же живут два диагноза «окно невозможно» — оба про АКТЁРА сцены, и оба видны только на
+## триггере:
+##  * `node_entered` на помещении с тегом `entry` — группа там стартует, события входа
+##    не бывает (`WINDOW_ON_ENTRY_NODE`). Список входов приходит аргументом: второй его
+##    сборки здесь не заводим.
+##  * `guard_in_sensor`, чью зону не посещает НИ ОДИН патруль
+##    (`WINDOW_ON_UNVISITED_SENSOR`) — сцена про человека на таком сенсоре не играется
+##    никогда, потому что контакты сенсоров ядро выдаёт только охране.
+##
+## Оба судятся только по ЦЕЛОМУ триггеру: у испорченного `type`/`sensor`/`node` корень уже
+## назван (`WRONG_TYPE`, `BAD_REF`), и второе следствие на ту же ошибку не выписываем
+## (шапка файла). Неизвестный сенсор в `known_sensors` не значится — о нём говорит
+## `_check_ref_key`, и «зона не посещается» про него было бы второй правдой о том же.
 static func _check_trigger(w: Dictionary, wid: String, known_edges: Dictionary,
-		known_sensors: Dictionary, known_nodes: Dictionary, problems: Array) -> Dictionary:
+		known_sensors: Dictionary, known_nodes: Dictionary, entries: Array,
+		patrolled: Dictionary, problems: Array) -> Dictionary:
 	if not w.has("trigger"):
 		problems.append(Problems.missing_field("windows.%s.trigger" % wid, TYPE_DICTIONARY))
 		return {"type": "", "edge": ""}
@@ -775,8 +1207,28 @@ static func _check_trigger(w: Dictionary, wid: String, known_edges: Dictionary,
 				edge = String(trigger["edge"])
 		"node_entered":
 			_check_ref_key(trigger, "node", "помещения", path, known_nodes, problems)
+			var node := String(trigger.get("node", "")) if typeof(trigger.get("node", null)) == TYPE_STRING else ""
+			if node != "" and entries.has(node):
+				problems.append(Problems.window_on_entry_node(wid, node))
 		"guard_in_sensor":
 			_check_ref_key(trigger, "sensor", "сенсора", path, known_sensors, problems)
+			## «Зону не посещает ни один патруль» — вопрос про ОБЪЕДИНЕНИЕ маршрутов:
+			## второй патруль через ту же зону окно оживляет.
+			##
+			## Пустое множество патрулей сюда не попадает как «мёртвый сенсор»: у миссии
+			## без патрулей корень в другом (их просто нет), и диагноз на каждое окно с
+			## сенсором был бы следствием пустого раздела, а не дефектом окна. Об этом
+			## прямо говорит положительный кейс «миссия без патрулей валидна».
+			var sensor := String(trigger.get("sensor", "")) if typeof(trigger.get("sensor", null)) == TYPE_STRING else ""
+			if sensor != "" and known_sensors.has(sensor) and not patrolled.is_empty():
+				var visited := false
+				var zones: Array = []
+				for node in _sensor_nodes(sensor, known_sensors):
+					zones.append(node)
+					if patrolled.has(node):
+						visited = true
+				if not visited:
+					problems.append(Problems.window_on_unvisited_sensor(wid, sensor, ", ".join(zones)))
 	return {"type": type, "edge": edge}
 
 
@@ -911,10 +1363,11 @@ static func _option_signature(o: Dictionary, cost_ok: bool) -> String:
 ## Мусор и пустой `fallback` не разбираются: их форма уже названа, и второго следствия
 ## одному дефекту не выписываем.
 ##
-## В `_check_effects` это правило НЕ переезжает намеренно: у действия точки доступа
-## (`access_points[].actions[].effects`) эффект `unlock` законен — терминал открывает
-## дверь, и «окна не про дверь» там не бывает. Общий разбор всех списков эффектов
-## покраснил бы честный контент.
+## Правило зовётся ТОЛЬКО из окон и только у окна не про дверь: «открывать нечего» —
+## утверждение про то, чего ждёт ЭТО окно. Общим разбором всех списков эффектов оно быть
+## не может: `unlock` законен у двери (`locked_edge`), и общий разбор покраснил бы честный
+## контент. Точки доступа (`access_points[].actions[].effects`) сюда не попадают вовсе —
+## раздела в форме больше нет, а действие у терминала выражается вариантом окна.
 static func _check_unlock_needs_door(raw, path: String, trigger_type: String, problems: Array) -> void:
 	if trigger_type == "" or trigger_type == "locked_edge":
 		return
@@ -1096,13 +1549,21 @@ static func _check_effects(raw, path: String, known_edges: Dictionary, problems:
 					var edge := _string_or(e["edge"], "%s.edge" % e_path, problems)
 					if edge != "" and not known_edges.is_empty() and not known_edges.has(edge):
 						problems.append(Problems.bad_ref("%s.edge" % e_path, "нет ребра «%s»" % edge))
-			"noise", "delay":
+			"noise", "delay", "money", "trace":
 				if not e.has("value"):
 					problems.append(Problems.missing_field("%s.value" % e_path, TYPE_INT))
 				else:
 					var v: Variant = _int_or(e["value"], "%s.value" % e_path, problems)
 					if v != null and int(v) < 0:
 						problems.append(Problems.bad_value("%s.value" % e_path, "значение не может быть отрицательным"))
+			"mark":
+				## Метка называется СТРОКОЙ, а не числом: `marks` в результате прогона —
+				## `Array[String]`, отсортированный по алфавиту (детерминизм отпечатка), и
+				## число здесь сделало бы выбор в окне неразличимым в «Итогах».
+				if not e.has("id"):
+					problems.append(Problems.missing_field("%s.id" % e_path, TYPE_STRING))
+				else:
+					_string_or(e["id"], "%s.id" % e_path, problems)
 			"engine_proposal":
 				## `id`, `want`, `needs` — строки, `fallback` — одиночный эффект ИЛИ массив
 				## (`01-format.md` §7) и он обязателен: без него окно останется без эффекта. Раньше в слот
@@ -1153,9 +1614,20 @@ static func _as_effect_list(raw) -> Array:
 	return []
 
 
-# --- разведка и точки доступа -------------------------------------------------
+# --- разведка -----------------------------------------------------------------
 
-static func _check_intel(data: Dictionary, known_patrols: Dictionary, problems: Array) -> void:
+## `_check_intel` судит разведку по трём правилам: форма блока и пунктов, ровно один
+## подброшенный пункт у агентуры (`INTEL_LIE_COUNT`) и **расхождение призрака с
+## реальностью** (`GHOST_SAME_AS_REAL`).
+##
+## Почему расхождение — правило формы, а не пожелание: сцена «призрак разошёлся» —
+## единственный индикатор тревоги в игре (`levels/mission-01.md` §11), и предусматривается
+## она ДАННЫМИ — маршрутом и периодом. Призрак, совпавший с реальным патрулём **по любому
+## из двух признаков**, расходится неполно: совпавший маршрут исчезает через такт, а
+## совпавший период виден только по времени. «Честный, но устаревший» пункт
+## выражается возрастом данных (`age_hours`), а не копией расписания.
+static func _check_intel(data: Dictionary, known_patrols: Dictionary, patrols: Dictionary,
+		problems: Array) -> void:
 	if not data.has("intel") or typeof(data["intel"]) != TYPE_ARRAY:
 		return
 	for i in (data["intel"] as Array).size():
@@ -1221,6 +1693,37 @@ static func _check_intel(data: Dictionary, known_patrols: Dictionary, problems: 
 				var patrol_id := _string_or(entry["id"], "%s.id" % e_path, problems)
 				if patrol_id != "" and not known_patrols.is_empty() and not known_patrols.has(patrol_id):
 					problems.append(Problems.bad_ref("%s.id" % e_path, "нет патруля «%s»" % patrol_id))
+				## ПРИЗРАК ОБЯЗАН РАСХОДИТЬСЯ. Правило смотрит на СУЩЕСТВУЮЩИЙ патруль
+				## (о несуществующем сказано `BAD_REF`) и только на пункт вида `patrol`:
+				## у `sensor`/`guard_count`/`door_state` расписания нет вовсе.
+				##
+				## Сравниваются ОБА признака, и КАЖДЫЙ обязан отличаться: «период без
+				## маршрута даёт расхождение, которое игрок увидит только по времени, а
+				## маршрут без периода — расхождение, которое исчезнет через такт». Значит,
+				## «совпал ровно один» — ТАКОЙ ЖЕ дефект, как дословная копия, и диагноз
+				## выписывается на любое совпадение. Прежнее чтение («совпал один —
+				## расхождение есть») было слабее решения, и именно этой слабостью проходил
+				## канонический контент: у трёх его пунктов маршрут совпадал с реальным, а
+				## отличался только период.
+				##
+				## Форма полей здесь не судится: не-массив `route` или нечисло `period` уже
+				## названы ниже (`WRONG_TYPE`), и призрак сравнивался бы с реальностью по
+				## мусору. Поэтому сравнение идёт только по ЧИТАЕМЫМ полям, а `_int_or`
+				## спрашивается с пустым списком проблем: это ЗОНД «число ли это», а не
+				## проверка — диагноз за нечисло выписывается ровно один раз, ниже.
+				var ghost_route = entry.get("route", null)
+				var ghost_period: Variant = _int_or(entry.get("period", null), "", [])
+				if patrol_id != "" and patrols.has(patrol_id) \
+						and typeof(ghost_route) == TYPE_ARRAY and ghost_period != null:
+					var real: Dictionary = patrols[patrol_id]
+					var real_route = real.get("route", [])
+					var real_period: Variant = _int_or(real.get("period", null), "", [])
+					if typeof(real_route) == TYPE_ARRAY and real_period != null:
+						var same_route := (ghost_route as Array) == (real_route as Array)
+						var same_period := int(ghost_period) == int(real_period)
+						if same_route or same_period:
+							problems.append(Problems.ghost_same_as_real(e_path, patrol_id,
+								_ghost_sameness(same_route, same_period, real_route, int(real_period))))
 			## Поля разведки, объявленные схемой (`01-format.md` §9), проверяются ПО ТИПУ: маршрут призрака —
 			## список помещений, период и счётчик — целые, состав сенсора — список, `false` —
 			## булево. Раньше эти поля не проверялись вовсе: `"route": "floor3"` и
@@ -1259,102 +1762,20 @@ static func _check_intel(data: Dictionary, known_patrols: Dictionary, problems: 
 			problems.append(Problems.intel_lie_count(channel, lies))
 
 
-static func _check_access_points(data: Dictionary, nodes: Dictionary, known_edges: Dictionary,
-		problems: Array) -> void:
-	if not data.has("access_points") or typeof(data["access_points"]) != TYPE_ARRAY:
-		return
-	var seen: Array = []
-	for i in (data["access_points"] as Array).size():
-		var ap = data["access_points"][i]
-		var path := "access_points[%d]" % i
-		if typeof(ap) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(ap)))
-			continue
-		_check_keys(ap, POINT_KEYS, path, problems)
-		for required in ["id", "node", "kind", "text_key"]:
-			if not ap.has(required):
-				problems.append(Problems.missing_field("%s.%s" % [path, required], TYPE_STRING))
-		_check_text_key(ap, "text_key", path, problems)
-		## `trace_key` — НЕобязательное поле точки доступа (`01-format.md` §10): ключ текста
-		## подсказки следа. Тип поля проверяется, а не подразумевается: без этой проверки
-		## испорченное поле не названо ничем — сбор текстовых ключей (`_walk_text_keys`)
-		## берёт только строки, и число молча выпадает из сверки.
-		##
-		## Второго диагноза проверка типа НЕ отменяет, и обещать это автору нельзя: число
-		## выпадает из сверки, поэтому текст, на который ссылался сломанный ключ, остаётся
-		## без ссылки и объявляется висячим. На `trace_key: 5` выходят ДВА диагноза —
-		## `WRONG_TYPE` про поле и `DANGLING_TEXT` про его текст. Каскад здесь не гасится:
-		## гашение — отдельное правило «одна ошибка — одно следствие» (шапка файла), и
-		## ради одного поля его не трогают. Оба диагноза закреплены ассертами кейса
-		## валидатора.
-		if ap.has("trace_key"):
-			_string_or(ap["trace_key"], "%s.trace_key" % path, problems)
-		var aid := _string_or(ap.get("id", ""), "%s.id" % path, problems)
-		if aid != "":
-			if seen.has(aid):
-				problems.append(Problems.duplicate_id("access_points", aid))
-			else:
-				seen.append(aid)
-		var node := _string_or(ap.get("node", ""), "%s.node" % path, problems)
-		if node != "" and not nodes.is_empty() and not nodes.has(node):
-			problems.append(Problems.bad_ref("%s.node" % path, "нет помещения «%s»" % node))
-		if ap.has("kind"):
-			var kind := _string_or(ap["kind"], "%s.kind" % path, problems)
-			if kind != "" and not POINT_KINDS.has(kind):
-				problems.append(Problems.bad_value("%s.kind" % path, "неизвестный вид точки «%s»" % kind))
-		if not ap.has("actions"):
-			problems.append(Problems.missing_field("%s.actions" % path, TYPE_ARRAY))
-			continue
-		if typeof(ap["actions"]) != TYPE_ARRAY:
-			problems.append(Problems.wrong_type("%s.actions" % path, TYPE_ARRAY, typeof(ap["actions"])))
-			continue
-		var actions: Array = ap["actions"]
-		if actions.is_empty():
-			problems.append(Problems.empty_section("%s.actions" % path))
-		var seen_actions: Array = []
-		for j in actions.size():
-			var action = actions[j]
-			var a_path := "%s.actions[%d]" % [path, j]
-			if typeof(action) != TYPE_DICTIONARY:
-				problems.append(Problems.wrong_type(a_path, TYPE_DICTIONARY, typeof(action)))
-				continue
-			_check_keys(action, ACTION_KEYS, a_path, problems)
-			## Ожидаемый тип — по факту поля: `complexity` число, `cost` словарь шагов.
-			for required in [["id", TYPE_STRING], ["text_key", TYPE_STRING], ["complexity", TYPE_INT],
-					["cost", TYPE_DICTIONARY]]:
-				if not action.has(String(required[0])):
-					problems.append(Problems.missing_field("%s.%s" % [a_path, String(required[0])],
-						required[1]))
-			_check_text_key(action, "text_key", a_path, problems)
-			var act_id := _string_or(action.get("id", ""), "%s.id" % a_path, problems)
-			if act_id != "":
-				if seen_actions.has(act_id):
-					problems.append(Problems.duplicate_id("%s.actions" % path, act_id))
-				else:
-					seen_actions.append(act_id)
-			if action.has("complexity"):
-				var act_complexity: Variant = _int_or(action["complexity"], "%s.complexity" % a_path, problems)
-				if act_complexity != null and (int(act_complexity) < 1 or int(act_complexity) > 3):
-					problems.append(Problems.bad_value("%s.complexity" % a_path, "сложность от 1 до 3"))
-			if action.has("cost"):
-				_check_action_cost(action["cost"], "%s.cost" % a_path, problems)
-			if action.has("effects"):
-				_check_effects(action["effects"], "%s.effects" % a_path, known_edges, problems)
-
-
-## Цена действия точки доступа — шаги (`01-format.md` §10): `cost.steps` обязателен,
-## целый и неотрицательный. Это единственное поле цены, которое знает эта форма.
-static func _check_action_cost(cost, cost_path: String, problems: Array) -> void:
-	if typeof(cost) != TYPE_DICTIONARY:
-		problems.append(Problems.wrong_type(cost_path, TYPE_DICTIONARY, typeof(cost)))
-		return
-	_check_keys(cost, ["steps", "note"], cost_path, problems)
-	if not cost.has("steps"):
-		problems.append(Problems.missing_field("%s.steps" % cost_path, TYPE_INT))
-		return
-	var steps: Variant = _int_or(cost["steps"], "%s.steps" % cost_path, problems)
-	if steps != null and int(steps) < 0:
-		problems.append(Problems.bad_value("%s.steps" % cost_path, "число шагов не может быть отрицательным"))
+## Что именно у призрака совпало с реальностью — словами, для диагноза `GHOST_SAME_AS_REAL`.
+##
+## Отличий два (маршрут и период), и совпасть может любое из них по отдельности:
+## «маршрут тот же» и «период тот же» — разные дефекты с разной правкой у автора (развести
+## путь и развести ритм). Сообщение обязано назвать тот, который и надо править, — иначе
+## автор слышит «призрак равен реальности» про пункт, где равен только период, и не знает,
+## что менять. Реальный патруль называется целиком: с ним и сравнивают.
+static func _ghost_sameness(same_route: bool, same_period: bool, real_route, real_period: int) -> String:
+	var what := "дословная копия: и маршрут, и период"
+	if same_route and not same_period:
+		what = "маршрут совпал с реальным (отличается только период)"
+	elif same_period and not same_route:
+		what = "период совпал с реальным (отличается только маршрут)"
+	return "%s; реальный патруль — маршрут %s, период %d" % [what, _route_text(real_route), real_period]
 
 
 # --- тексты -------------------------------------------------------------------
@@ -1495,8 +1916,8 @@ static func _string_or(value, path: String, problems: Array) -> String:
 ## терял, не видя, какое поле испорчено.
 ##
 ## `WRONG_TYPE` при этом ДОБАВЛЯЕТСЯ к тому диагнозу, а не заменяет его: поле
-## действительно оставило свой текст без ссылки, и оба следствия верны. Ровно так
-## ведёт себя `trace_key` (см. `_check_access_points`); каскад здесь не гасится —
+## действительно оставило свой текст без ссылки, и оба следствия верны. Так же ведёт
+## себя испорченный `name_key` помещения и `facility_key`; каскад здесь не гасится —
 ## гашение было бы отдельным правилом «одна ошибка — одно следствие», и оба диагноза
 ## закреплены ассертами.
 static func _check_text_key(obj: Dictionary, key: String, path: String, problems: Array) -> void:

@@ -5,7 +5,9 @@ extends SceneTree
 ## набора не является (разные вопросы — разные ответы). Печатает числа в stdout; код
 ## возврата относится к самому замеру: 0 — замер состоялся и внутренние инварианты
 ## инструмента целы (миссия собрана, сценарий вмешательства сошёлся на неподвижной точке,
-## детерминизм подтверждён повторным прогоном), 1 — иначе.
+## детерминизм подтверждён повторным прогоном), 1 — иначе. Аборт внутри `_measure()`
+## (рантайм-сбой) — тоже 1: вердикт выносится конвертом, и «прервалось» неотличимо от
+## «не сошлось» только по тексту, но не по коду возврата.
 ##
 ## Каждое число берётся из журнала `sim.events` (`docs/architecture.md` §5) и в отчёте
 ## названо событием-источником. Ничего не настраивается: замер измеряет, а не подгоняет.
@@ -20,9 +22,12 @@ extends SceneTree
 
 const Loader := preload("res://content/loader.gd")
 const Problems := preload("res://content/problems.gd")
-const Harness := preload("res://sim/harness.gd")
 const Plan := preload("res://sim/plan.gd")
 const WindowScript := preload("res://sim/window.gd")
+## Построение сценария вмешательства (`_order_script`, `_window_sequence`, `_pick`) вынесено
+## в общий модуль: тот же сценарий строит приёмочный инструмент поставки
+## (`tests/accept_delivery.gd`), и копия разошлась бы с этим замером молча.
+const OrderBuilder := preload("res://tests/order_builder.gd")
 
 const MISSION_PATH := "res://content/mission-01.json"
 const TEXTS_PATH := "res://content/texts.ru.json"
@@ -120,9 +125,6 @@ const PROBES := [
 	},
 ]
 
-## Сколько раз искать неподвижную точку сценария вмешательства (см. `_order_script`).
-const MAX_SCRIPT_ITERATIONS := 6
-
 ## Прогоны, хронология которых печатается целиком. Каждый назван под свой вывод отчёта:
 ##   B_full/1 — тайминг сцены ★27 (тревога, подход к Л2, окно, конец);
 ##   A_2floor/4 — тревога на шаге 5 БЕЗ единого приказа (состав шума из `agent_compromised`);
@@ -140,9 +142,25 @@ var _verdict_reached := false
 
 
 func _initialize() -> void:
-	var code := _measure()
+	## Результат замера — КОНВЕРТ, а не код возврата, и это не украшение. Рантайм-сбой
+	## внутри `_measure()` прерывает ТОЛЬКО её: рантайм-ошибка возвращает управление
+	## вызывающему, и `var code := _measure()` получает правдоподобный ноль при уже
+	## напечатанном `SCRIPT ERROR` — сторож `_process` при этом молчит, потому что
+	## `_verdict_reached` выставляется следующей строкой. Механизм тот же, что пойман
+	## пробой P7 в `accept_delivery.gd` (и ради него там стоит такой же конверт).
+	var result = _measure()
+	if typeof(result) != TYPE_DICTIONARY or not (result as Dictionary).has("verdict_code"):
+		print("АБОРТ  вердикт не выставлен: _measure() прервался, а не дошёл до вердикта (код 1)")
+		_verdict_reached = true
+		quit(1)
+		return
 	_verdict_reached = true
-	quit(code)
+	quit(int((result as Dictionary)["verdict_code"]))
+
+
+## Код вердикта в конверте (см. `_initialize`): код едет ключом, а не значением функции.
+func _verdict(code: int) -> Dictionary:
+	return {"verdict_code": code}
 
 
 ## Сторож как у `run.gd`: прерванный `_initialize()` иначе оставил бы процесс висеть
@@ -155,16 +173,16 @@ func _process(_delta: float) -> bool:
 	return true
 
 
-func _measure() -> int:
+func _measure() -> Dictionary:
 	var loaded := _load_mission()
 	if loaded["mission"] == null:
 		print("МИССИЯ НЕ СОБРАНА: %s" % _brief(loaded["problems"]))
-		return 1
+		return _verdict(1)
 	var mission = loaded["mission"]
 
 	print("=== Замер миссии 01 «Холодный архив»: поведение на реальном контенте ===")
 	print("окон в данных: %d, рёбер: %d, помещений: %d" % [
-		_windows(mission).size(), mission.edges.size(), mission.nodes.size()])
+		OrderBuilder.windows(mission).size(), mission.edges.size(), mission.nodes.size()])
 	print("seeds: %s; маршрутов: %d; поведений: %d; состав по умолчанию: %s" % [
 		str(SEEDS), ROUTES.size(), BEHAVIORS.size(), _crew(mission)])
 	print("выход плана в матрице: %s (тот же вход, что и в замере ДО правки задачи 8: %s)" % [
@@ -230,7 +248,7 @@ func _measure() -> int:
 		print("ИТОГ ЗАМЕРА: состоялся (код 0; вердиктом набора инструмент не является)")
 	else:
 		print("ИТОГ ЗАМЕРА: НЕПОЛОН — см. предупреждения и детерминизм выше (код 1)")
-	return 0 if ok else 1
+	return _verdict(0 if ok else 1)
 
 
 # ---------------------------------------------------------------- вход и прогон
@@ -284,25 +302,20 @@ func _crew(mission) -> String:
 	return ", ".join(parts)
 
 
-## Один прогон штатным харнессом; журнал берём у самого `Sim` (4-й аргумент харнесса).
-func _run(mission, plan, script: Array, config: Dictionary) -> Dictionary:
-	var box := RefCounted.new()
-	var out: Dictionary = Harness.run_scenario(mission, plan, script, config, box)
-	var sim = box.get_meta("sim")
-	return {"out": out, "events": sim.events}
-
-
 ## Прогон одного поведения: молчание — пустой сценарий (игрок молчит на каждом окне),
-## приказы — сценарий, найденный до неподвижной точки.
+## приказы — сценарий, найденный до неподвижной точки. И прогон, и построение сценария
+## живут в общем модуле `order_builder.gd`: тот же код зовёт приёмочный инструмент,
+## поэтому «приказы» здесь и там считаются по одному правилу.
 func _build_run(mission, plan, r: Dictionary, seed: int, behavior: String,
 		noise_start := 0) -> Dictionary:
 	var config := {"seed": seed}
 	if noise_start > 0:
 		config["noise_start"] = noise_start
 	if behavior == BEHAVIOR_SILENCE:
-		return {"script": [], "iterations": 1, "stable": true, "run": _run(mission, plan, [], config)}
-	var picker := "first" if behavior == BEHAVIOR_FIRST else "loud"
-	var built := _order_script(mission, plan, seed, picker, noise_start)
+		return {"script": [], "iterations": 1, "stable": true,
+			"run": OrderBuilder.run(mission, plan, [], config)}
+	var picker := OrderBuilder.PICK_FIRST if behavior == BEHAVIOR_FIRST else OrderBuilder.PICK_LOUD
+	var built := OrderBuilder.order_script(mission, plan, seed, picker, noise_start)
 	return built
 
 
@@ -328,77 +341,6 @@ const EXIT_PROBES := [
 	{"route": "B_full", "exit": "dock1",
 		"why": "полный акт 4-го, выход = вход (док)"},
 ]
-
-## Сценарий вмешательства: приказ отдаётся на КАЖДОМ окне (пул кончится — отказы
-## `no_orders`, канал заглохнет — отказы `jammed`; и то и другое и есть замер).
-##
-## Харнесс принимает плоский список вариантов, а окна открываются в порядке, зависящем
-## от эффектов предыдущих, поэтому список ищется до неподвижной точки: прогон →
-## фактическая последовательность окон (`order_issued`/`order_silenced`) → список
-## вариантов по ней → снова прогон. Устойчивость видна в `stable`/`iterations`.
-func _order_script(mission, plan, seed: int, picker: String, noise_start: int) -> Dictionary:
-	var config := {"seed": seed}
-	if noise_start > 0:
-		config["noise_start"] = noise_start
-	var draft: Array = []
-	var last: Array = []
-	for attempt in range(1, MAX_SCRIPT_ITERATIONS + 1):
-		var run := _run(mission, plan, draft, config)
-		var seq := _window_sequence(run["events"])
-		if seq == last:
-			return {"script": draft, "iterations": attempt, "stable": true, "run": run}
-		last = seq
-		draft = _options_for(mission, seq, picker)
-	var final_run := _run(mission, plan, draft, config)
-	return {"script": draft, "iterations": MAX_SCRIPT_ITERATIONS, "stable": false, "run": final_run}
-
-
-## Последовательность открывшихся окон: у каждого окна ровно одно из событий
-## `order_issued` / `order_silenced` (отказ харнесс добивает молчанием), и оба несут
-## составной id окна `вид:якорь` (`sim.gd:order`).
-func _window_sequence(events: Array) -> Array:
-	var out: Array = []
-	for e in events:
-		var t := str(e["type"])
-		if t == "order_issued" or t == "order_silenced":
-			out.append(str(e["data"]["window"]))
-	return out
-
-
-## Варианты окон последовательности: `first` — первый вариант автора данных,
-## `loud` — самый шумный вариант (проба «а если шуметь сильнее»: влияет ли это
-## на тревогу и на сцену ★27). Порядок окон — фактический порядок прогона.
-func _options_for(mission, seq: Array, picker: String) -> Array:
-	var by_id: Dictionary = {}
-	for w in _windows(mission):
-		by_id[_runtime_id(w)] = w
-	var out: Array = []
-	for wid in seq:
-		var w = by_id.get(String(wid), null)
-		if w == null:
-			## Неизвестное окно — сценарий разошёлся с данными; это ловится счётчиком
-			## `unknown_option` в строке замера, а не молчанием.
-			out.append("silence")
-			continue
-		out.append(_pick(WindowScript.from_data(w, ""), picker))
-	return out
-
-
-func _pick(w: Dictionary, picker: String) -> String:
-	var best := ""
-	var best_noise := -1
-	for o in w["options"]:
-		var id := String(o["id"])
-		if id == WindowScript.SILENCE:
-			continue
-		if picker == "first":
-			return id
-		var noise := int(o.get("noise", 0))
-		if noise > best_noise:
-			best_noise = noise
-			best = id
-	return best
-
 
 # ---------------------------------------------------------------- сбор чисел
 
@@ -540,11 +482,6 @@ func _anchor_value(d: Dictionary) -> String:
 	return ""
 
 
-func _windows(mission) -> Array:
-	var raw = mission.data.get("windows", [])
-	return raw if typeof(raw) == TYPE_ARRAY else []
-
-
 ## Где стоят свои в конце прогона (`result().positions`): «застряли» — это факт позиции,
 ## а не вывод из молчания отчёта.
 func _own_positions(out: Dictionary) -> String:
@@ -560,8 +497,7 @@ func _own_positions(out: Dictionary) -> String:
 	return ", ".join(parts)
 
 
-func _runtime_id(w: Dictionary) -> String:
-	return String(WindowScript.from_data(w, "").get("id", ""))
+# ---------------------------------------------------------------- печать
 
 
 # ---------------------------------------------------------------- печать
@@ -666,8 +602,8 @@ func _print_window_coverage(mission, rows: Array) -> void:
 		var by_window: Dictionary = row["by_window"]
 		for wid in by_window:
 			total[wid] = int(total.get(wid, 0)) + int(by_window[wid])
-	for w in _windows(mission):
-		var rid := _runtime_id(w)
+	for w in OrderBuilder.windows(mission):
+		var rid := OrderBuilder.runtime_id(w)
 		print("  %-16s %-24s открылось: %d" % [
 			str(w.get("id", "")), rid, int(total.get(rid, 0))])
 	print("")
@@ -935,7 +871,7 @@ func _determinism(mission) -> Array:
 		var plan := _plan_for(r)
 		var first := _build_run(mission, plan, r, int(c["seed"]), str(c["behavior"]))
 		var second_plan := _plan_for(r)
-		var second := _run(mission, second_plan, first["script"], {"seed": int(c["seed"])})
+		var second := OrderBuilder.run(mission, second_plan, first["script"], {"seed": int(c["seed"])})
 		var same := str(first["run"]["out"]["digest"]) == str(second["out"]["digest"])
 		out.append({
 			"same": same,

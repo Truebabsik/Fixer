@@ -3,8 +3,8 @@
   "title_key": "mission.01.title",
   "facility_key": "facility.meridian",
   "nodes": {
-    "archive0":     { "floor": -1, "tags": ["cold_archive"], "pos": { "x": 8, "y": 0 }, "name_key": "room.archive0" },
-    "hall0":        { "floor": -1, "tags": [], "pos": { "x": 0, "y": 0 }, "name_key": "room.hall0" },
+    "archive0":     { "floor": -1, "tags": ["cold_archive", "shielded"], "pos": { "x": 8, "y": 0 }, "name_key": "room.archive0" },
+    "hall0":        { "floor": -1, "tags": ["shielded"], "pos": { "x": 0, "y": 0 }, "name_key": "room.hall0" },
 
     "main_entry1":   { "floor": 1, "tags": ["entry"], "pos": { "x": 4, "y": 12 }, "name_key": "room.main_entry1" },
     "reception1":    { "floor": 1, "tags": ["staff"], "pos": { "x": 4, "y": 8 }, "name_key": "room.reception1" },
@@ -225,13 +225,21 @@
       "kind": "node_entered",
       "trigger": { "type": "node_entered", "node": "term2" },
       "text_key": "window.w_lead_found.text",
+      "note": "терминал на 2-м: ДВА соблазна и зацепка. Прежде деньги и инструменты жили в разделе access_points, который ядро не исполняет вовсе — теперь это варианты окна, и эффекты у них те же (money/trace/mark)",
       "options": [
         { "id": "dig_logs", "text_key": "window.w_lead_found.dig_logs", "complexity": 1,
           "cost": { "noise": 0, "delay": 2 },
           "effects": [{ "type": "engine_proposal", "id": "lead_known",
                         "want": "Зацепка «выгрузка в холодное хранение» сохраняется в журнале и ведёт группу в подвал осознанно",
                         "needs": "флаг события в журнале",
-                        "fallback": { "type": "noop" } }] }
+                        "fallback": { "type": "noop" } }] },
+        { "id": "take_money", "text_key": "window.w_lead_found.take_money", "complexity": 1,
+          "cost": { "noise": 0, "delay": 2 },
+          "effects": [{ "type": "money", "value": 15 }, { "type": "trace", "value": 5 }] },
+        { "id": "tools", "text_key": "window.w_lead_found.tools", "complexity": 2,
+          "cost": { "noise": 1, "delay": 2 },
+          "effects": [{ "type": "trace", "value": 4 }],
+          "note": "ключ и снять камеру — инструменты: шум сразу, след по сессии" }
       ],
       "silence": {
         "text_key": "window.w_lead_found.silence",
@@ -244,6 +252,63 @@
         "bad": [{ "type": "delay", "value": 3 }, { "type": "noise", "value": 5 }],
         "safe": [{ "type": "delay", "value": 3 }],
         "note": "Кира не копает: группа идёт дальше с догадкой вместо факта"
+      }
+    },
+    {
+      "id": "w_term3",
+      "kind": "node_entered",
+      "trigger": { "type": "node_entered", "node": "term3" },
+      "text_key": "window.w_term3.text",
+      "note": "терминал 3-го: третий соблазн уровня. Был действием точки доступа ap_term3 — стал вариантами окна; транзитный этаж, поэтому цена — только время",
+      "options": [
+        { "id": "take_money", "text_key": "window.w_term3.take_money", "complexity": 1,
+          "cost": { "noise": 0, "delay": 3 },
+          "effects": [{ "type": "money", "value": 25 }, { "type": "trace", "value": 5 }] },
+        { "id": "clues", "text_key": "window.w_term3.clues", "complexity": 2,
+          "cost": { "noise": 0, "delay": 2 },
+          "effects": [{ "type": "trace", "value": 2 }, { "type": "mark", "id": "clues_read" }],
+          "note": "переписка, имена — зацепки: метка говорит «Итогам», что группу вели не вслепую" }
+      ],
+      "silence": {
+        "text_key": "window.w_term3.silence",
+        "good_key": "window.w_term3.silence.good",
+        "neutral_key": "window.w_term3.silence.neutral",
+        "bad_key": "window.w_term3.silence.bad",
+        "safe_key": "window.w_term3.silence.safe",
+        "good": [{ "type": "noop" }],
+        "neutral": [{ "type": "delay", "value": 3 }],
+        "bad": [{ "type": "delay", "value": 3 }, { "type": "noise", "value": 5 }],
+        "safe": [{ "type": "delay", "value": 3 }],
+        "note": "Кира проходит мимо рабочего места: зацепок нет, и следа тоже"
+      }
+    },
+    {
+      "id": "w_answer",
+      "kind": "node_entered",
+      "trigger": { "type": "node_entered", "node": "term5" },
+      "text_key": "window.w_answer.text",
+      "note": "терминал руководства на 5-м: здесь ось «копия против оригинала» становится выбором игрока — копию берут меткой, а не перевозкой носителей. Был действиями точки доступа ap_term5",
+      "options": [
+        { "id": "copy_data", "text_key": "window.w_answer.copy_data", "complexity": 2,
+          "cost": { "noise": 0, "delay": 4 },
+          "effects": [{ "type": "trace", "value": 3 }, { "type": "mark", "id": "copy_taken" }],
+          "note": "копия дела; факт «имена вымараны» виден сразу, и метка фиксирует, что ушли с копией" },
+        { "id": "take_money", "text_key": "window.w_answer.take_money", "complexity": 1,
+          "cost": { "noise": 1, "delay": 3 },
+          "effects": [{ "type": "money", "value": 40 }, { "type": "trace", "value": 8 }],
+          "note": "сейфовый счёт руководства: самый крупный соблазн уровня и самый заметный след" }
+      ],
+      "silence": {
+        "text_key": "window.w_answer.silence",
+        "good_key": "window.w_answer.silence.good",
+        "neutral_key": "window.w_answer.silence.neutral",
+        "bad_key": "window.w_answer.silence.bad",
+        "safe_key": "window.w_answer.silence.safe",
+        "good": [{ "type": "noop" }],
+        "neutral": [{ "type": "delay", "value": 3 }],
+        "bad": [{ "type": "delay", "value": 3 }, { "type": "noise", "value": 5 }],
+        "safe": [{ "type": "delay", "value": 3 }],
+        "note": "Кира уводит группу от терминала руководства: ответа нет, и следа нет"
       }
     },
     {
@@ -378,7 +443,7 @@
                   "needs": "флаг раскрытия в «Итогах»",
                   "fallback": { "type": "delay", "value": 3 } }],
         "safe": [{ "type": "delay", "value": 3 }],
-        "note": "заявка reveal_operation_silence перенесена в bad (D41): дочитать то, что читать было нельзя, — плохой исход импровизации, а в safe Эхо в группе нет"
+        "note": "заявка reveal_operation_silence перенесена в bad: дочитать то, что читать было нельзя, — плохой исход импровизации, а в safe Эхо в группе нет"
       }
     },
     {
@@ -461,7 +526,7 @@
                 { "type": "unlock", "edge": "e_freight_4_0" }],
         "safe": [{ "type": "delay", "value": 3 },
                  { "type": "unlock", "edge": "e_freight_4_0" }],
-        "note": "молчание не проваливает окно: из кабины выбираются сами (D37/D38)"
+        "note": "молчание не проваливает окно: из кабины выбираются сами"
       }
     },
     {
@@ -505,13 +570,15 @@
       "channel": "agents",
       "observed_at": 0,
       "entries": [
-        { "kind": "patrol", "id": "guard_1", "route": ["reception1", "hall1"], "period": 4,
-          "age_hours": 6, "false": false, "note_key": "intel.agents.guard1" },
-        { "kind": "patrol", "id": "guard_2", "route": ["dock1", "hall1"], "period": 6,
-          "age_hours": 6, "false": false, "note_key": "intel.agents.guard2" },
-        { "kind": "patrol", "id": "guard_3", "route": ["hall4", "term4"], "period": 6,
+        { "kind": "patrol", "id": "guard_1", "route": ["reception1", "hall1", "stair1"], "period": 5,
+          "age_hours": 6, "false": false, "note_key": "intel.agents.guard1",
+          "note": "призрак расходится ДВАЖДЫ (D48): путь назван шире настоящего (приёмная → холл → лестница, а охрана ходит только reception1↔hall1), и ритм другой (5 против 4)" },
+        { "kind": "patrol", "id": "guard_2", "route": ["dock1", "hall1", "stair1"], "period": 7,
+          "age_hours": 6, "false": false, "note_key": "intel.agents.guard2",
+          "note": "то же: путь назван шире настоящего (док → холл → лестница против dock1↔hall1), ритм — другой (7 против 6)" },
+        { "kind": "patrol", "id": "guard_3", "route": ["hall4", "it_open4", "hall4", "hall3"], "period": 6,
           "age_hours": 6, "false": true, "note_key": "intel.agents.patrol_false",
-          "note": "ЕДИНСТВЕННЫЙ подброшенный пункт миссии: ложное расписание обхода на 4-м" },
+          "note": "ЕДИНСТВЕННЫЙ подброшенный пункт миссии: ложное расписание обхода на 4-м. Расходится с настоящим И маршрутом, И периодом (настоящий — hall4↔it_open4, период 4): призрак, равный реальности, не расходится никогда, и индикатор тревоги не работает" },
         { "kind": "door_state", "node": "dock1", "age_hours": 6, "false": false,
           "note_key": "intel.agents.dock_deliveries" },
         { "kind": "guard_count", "node": "it_open4", "count": 1, "age_hours": 6, "false": false,
@@ -524,9 +591,9 @@
       "channel": "hack",
       "observed_at": 0,
       "entries": [
-        { "kind": "patrol", "id": "guard_3", "route": ["hall4", "it_open4"], "period": 4,
+        { "kind": "patrol", "id": "guard_3", "route": ["hall4", "it_open4", "term4"], "period": 5,
           "age_hours": 8, "false": false, "note_key": "intel.hack.patrol_snapshot",
-          "note": "снимок сети 8-часовой давности — старая правда, расходится с ложью агентуры" },
+          "note": "снимок сети 8-часовой давности: обход назван шире настоящего (холл → открытая зона вместе с терминалом term4 против hall4↔it_open4), и период успел измениться (5 против 4) — старая правда расходится И маршрутом, И периодом" },
         { "kind": "door_state", "node": "it4", "age_hours": 8, "false": false,
           "note_key": "intel.hack.it4_closed" },
         { "kind": "sensor", "nodes": ["hall2"], "age_hours": 8, "false": false,
@@ -544,48 +611,17 @@
       ]
     }
   ],
-  "access_points": [
-    {
-      "id": "ap_term2", "node": "term2", "kind": "terminal",
-      "text_key": "ap.ap_term2.text",
-      "trace_key": "ap.ap_term2.trace",
-      "actions": [
-        { "id": "take_money", "text_key": "ap.ap_term2.take_money", "complexity": 1,
-          "cost": { "steps": 2 },
-          "effects": [{ "type": "money", "value": 15 }, { "type": "trace", "value": 5 }] },
-        { "id": "tools", "text_key": "ap.ap_term2.tools", "complexity": 1,
-          "cost": { "steps": 2 },
-          "effects": [{ "type": "trace", "value": 4 }],
-          "note": "ключ и снять камеру — инструменты" }
-      ]
-    },
-    {
-      "id": "ap_term3", "node": "term3", "kind": "terminal",
-      "text_key": "ap.ap_term3.text",
-      "trace_key": "ap.ap_term3.trace",
-      "actions": [
-        { "id": "take_money", "text_key": "ap.ap_term3.take_money", "complexity": 1,
-          "cost": { "steps": 3 },
-          "effects": [{ "type": "money", "value": 25 }, { "type": "trace", "value": 5 }] },
-        { "id": "clues", "text_key": "ap.ap_term3.clues", "complexity": 1,
-          "cost": { "steps": 2 },
-          "effects": [{ "type": "trace", "value": 2 }],
-          "note": "переписка, имена — зацепки" }
-      ]
-    },
-    {
-      "id": "ap_term5", "node": "term5", "kind": "terminal",
-      "text_key": "ap.ap_term5.text",
-      "trace_key": "ap.ap_term5.trace",
-      "actions": [
-        { "id": "copy_data", "text_key": "ap.ap_term5.copy_data", "complexity": 1,
-          "cost": { "steps": 4 },
-          "effects": [{ "type": "trace", "value": 3 }],
-          "note": "копия дела; факт «имена вымараны» виден сразу" },
-        { "id": "take_money", "text_key": "ap.ap_term5.take_money", "complexity": 1,
-          "cost": { "steps": 3 },
-          "effects": [{ "type": "money", "value": 40 }, { "type": "trace", "value": 8 }] }
-      ]
-    }
+  "routes": [
+    { "id": "a_2floor", "entry": "main_entry1", "exit": "main_entry1",
+      "route": ["main_entry1", "reception1", "hall1", "stair1", "stair2", "hall2", "kitchen2", "hall2", "term2",
+                "hall2", "stair2", "stair1", "hall0", "archive0", "hall0", "stair1", "hall1", "reception1", "main_entry1"],
+      "note": "замысел прохождения от главного входа: подъём на 2-й (лестница: Л1 в подвал не ходит) → свидетель и кухня 2-го → логи терминала → спуск в подвал через охраняемый первый этаж и дверь холодного зала; назад тем же путём, каким вошёл (выход в MVP — один из входов)" },
+    { "id": "b_4floor", "entry": "dock1", "exit": "dock1",
+      "route": ["dock1", "hall1", "lift_freight1", "it_open4", "archive0", "it_open4", "lift_freight1", "hall1", "dock1"],
+      "note": "замысел прохождения от грузового дока (B_freight в measure_mission01.gd): док → Л2 сразу в ИТ-зону 4-го → грузовым лифтом вниз в архив; назад тем же путём, каким вошёл (выход в MVP — один из входов). Прежняя редакция шла «по графу» через лестницу первого этажа — это не замысел уровня, а удобный путь" },
+    { "id": "c_roof", "entry": "roof", "exit": "roof",
+      "route": ["roof", "hall5", "office5", "hall5", "stair5", "stair4", "stair3", "stair2", "stair1", "hall0",
+                "archive0", "hall0", "stair1", "stair2", "stair3", "stair4", "stair5", "hall5", "roof"],
+      "note": "замысел прохождения от кровли: терминал руководства на 5-м → вниз пешком (лестница: Л1 в подвал не ходит) → архив → назад на кровлю: путь наружу ограничен входом" }
   ]
 }

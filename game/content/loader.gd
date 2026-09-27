@@ -66,7 +66,13 @@ static func load_mission(data, texts) -> Dictionary:
 	mission.set_data({
 		"windows": _deep(_items(data, "windows")),
 		"intel": _deep(_items(data, "intel")),
-		"access_points": _deep(_items(data, "access_points")),
+		## Нормативные маршруты уровня: раздел объявлен и в `Validator.ARRAY_SECTIONS`
+		## (файл), и в `Mission.DATA_ARRAY_SECTIONS` (модель). Оба конца обязательны:
+		## без первого раздел не пройдёт валидатор, без второго — молча не доедет сюда.
+		## Снятый `access_points` в payload не кладётся: модель его не знает, а валидатор
+		## такой файл не пропустит — `set_data` отфильтровал бы раздел, и сборка payload
+		## утверждала бы то, чего в модели нет.
+		"routes": _deep(_items(data, "routes")),
 		## `_deep`, а не `texts.duplicate(true)`: при явном `null` копировать нечего —
 		## `duplicate()` на `null` уронил бы вызов рантаймом, а подставить сюда `{}`
 		## значило бы выдать отказ от сверки за утверждение «текстов нет».

@@ -5,8 +5,34 @@ extends RefCounted
 ## новую проблему. Кубика здесь нет — сравнение детерминировано (D31),
 ## поэтому дешёвая команда предсказуемо плоха, а не «слаба по статам».
 ## Таблица — docs/spr/mercs.md §1.
+##
+## В MVP окно из сбоя не создаётся: буквальность стоит ЦЕНЫ — шума и задержки
+## (D51, «честное упрощение», возврат задела — когда появится фасовка заготовок
+## №21–24). Числа цены — `docs/spr/mercs.md` §1; здесь только их арифметика,
+## чтобы таблица в справочнике и код не разошлись двумя списками.
+
+## Надбавка за ОДНО очко разрыва «сложность − Понимание»: числа — mercs.md §1.
+const LITERAL_NOISE_PER_GAP := 3
+const LITERAL_DELAY_PER_GAP := 1
 
 
 ## complexity 1..3 — число условий в приказе, understanding 0..3 — качество бойца.
 static func resolves_literally(complexity: int, understanding: int) -> bool:
 	return complexity > understanding
+
+
+## Надбавка за буквальное исполнение: `{"noise": …, "delay": …}`.
+## Пустой словарь — приказ исполнен как задумано, надбавки нет.
+##
+## Разрыв считается по ТОМУ ЖЕ правилу, что и сам факт буквальности
+## (`resolves_literally`): своего условия «когда буквально» здесь нет, иначе две
+## половины одного правила разошлись бы молча (проба: `resolves_literally` всегда
+## `false` — надбавка обязана исчезнуть вместе с событием).
+static func literal_cost(complexity: int, understanding: int) -> Dictionary:
+	if not resolves_literally(complexity, understanding):
+		return {}
+	var gap := complexity - understanding
+	return {
+		"noise": LITERAL_NOISE_PER_GAP * gap,
+		"delay": LITERAL_DELAY_PER_GAP * gap,
+	}

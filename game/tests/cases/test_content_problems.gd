@@ -135,22 +135,27 @@ func run() -> Array:
 
 	# 3. payload миссии: типизированные разделы доезжают до данных без потерь.
 	# Mission остаётся единственной моделью миссии — второго представления не заводим.
+	# Раздел — `routes`: снятый `access_points` модель не знает ни данными, ни умолчанием
+	# (проверяется в кейсе загрузчика), а нормативные маршруты знает и обязан нести.
 	var m := Mission.new()
 	m.set_data({
 		"windows": [{"id": "w_a", "trigger": {"type": "locked_edge", "edge": "e_x"}}],
 		"intel": [{"channel": "hack", "entries": []}],
-		"access_points": [{"id": "ap_a", "node": "hall"}],
+		"routes": [{"id": "main", "entry": "dock", "exit": "dock", "route": ["dock", "hall", "dock"]}],
 	})
 	t.is_true("payload: окна доехали", m.data["windows"].size() == 1)
 	t.eq("payload: id окна", String(m.data["windows"][0]["id"]), "w_a")
 	t.is_true("payload: разведка доехала", m.data["intel"].size() == 1)
-	t.is_true("payload: точки доступа доехали", m.data["access_points"].size() == 1)
+	t.is_true("payload: маршруты доехали", (m.data.get("routes", []) as Array).size() == 1)
 
 	# 4. Миссия без payload остаётся рабочей: фикстура собирается прежним API,
 	# и разделы новых данных просто пусты.
+	# Чтение через `get(..., "ПОЛЯ НЕТ")`, а не через `data["routes"]`: выпавший из
+	# `DATA_ARRAY_SECTIONS` раздел обязан назваться ЭТИМ ассертом, а не уронить `run()`
+	# (тогда раннер печатает `LOAD FAIL`, и красное перестаёт называть сломанное правило).
 	var plain := Mission.new()
 	t.is_true("без payload: окна пусты", plain.data["windows"].is_empty())
 	t.is_true("без payload: разведка пуста", plain.data["intel"].is_empty())
-	t.is_true("без payload: точки доступа пусты", plain.data["access_points"].is_empty())
+	t.eq("без payload: маршруты есть и пусты", plain.data.get("routes", "ПОЛЯ НЕТ"), [])
 
 	return t.results

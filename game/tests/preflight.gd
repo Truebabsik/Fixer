@@ -24,6 +24,10 @@ const Suite := preload("res://tests/suite.gd")
 ## Раннеров (`tests/run.gd`, `tests/run_red.gd`) в списке нет намеренно: движок разбирает
 ## названный `--script` сам, поэтому ошибка в них ловится их же командой гейта — проверено
 ## прогоном (код 1 и у разбора, и у прогона сломанного `run.gd`).
+## Инструменты (`tests/order_builder.gd`, `tests/measure_mission01.gd`,
+## `tests/accept_delivery.gd`) — НАОБОРОТ, в списке: гейт их не запускает, `--script` им
+## называет человек или бриф, и без этой строки синтаксическая ошибка в инструменте не
+## называлась бы своим файлом нигде.
 const MODULES := [
 	# sim/ — листья: ни от кого не зависят
 	"res://sim/agent.gd",
@@ -41,6 +45,15 @@ const MODULES := [
 	"res://content/problems.gd",
 	"res://content/validator.gd",
 	"res://content/loader.gd",
+	# tests/ — инструменты приёмки и замера. Они не кейсы набора (вердиктом набора не
+	# являются), но и не раннеры: их называет `--script` СНАРУЖИ (человек или бриф), и
+	# синтаксическая ошибка в них иначе не называлась бы своим файлом вовсе — прогон
+	# просто не состоялся бы, а `--check-only` на них, как и на наборе, даёт код 0 при
+	# неразобранном модуле (проверено пробой M5).
+	# `order_builder.gd` — до тех, кто его тянет через `preload`.
+	"res://tests/order_builder.gd",
+	"res://tests/measure_mission01.gd",
+	"res://tests/accept_delivery.gd",
 ]
 
 var _verdict_reached := false

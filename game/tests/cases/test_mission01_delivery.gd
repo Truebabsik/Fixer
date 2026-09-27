@@ -46,8 +46,8 @@ const TEXTS_PATH := "res://content/texts.ru.json"
 ## Факт поставки (см. шапку файла), а не инвариант движка.
 const DELIVERY_NODES := 28
 const DELIVERY_EDGES := 33
-const DELIVERY_WINDOWS := 11
-const DELIVERY_TEXTS := 203
+const DELIVERY_WINDOWS := 13
+const DELIVERY_TEXTS := 209
 const DELIVERY_PROPOSALS := 18
 ## Этажи поставки: подвал, 1–5 и кровля. Тоже факт уровня (`levels/mission-01.md` §3),
 ## а не инвариант движка: у другой миссии этажей меньше или больше.

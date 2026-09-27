@@ -1,0 +1,12 @@
+; Самопроверка контента для внешнего исполнителя: минимальный проект Godot 4.7.
+;
+; Здесь НЕТ ни автозагрузок, ни сцен, ни плагинов: единственное, что запускается, —
+; `verify.gd` через `--script`. Проект нужен только для того, чтобы путь `res://`
+; указывал на эту папку и `preload("res://content/validator.gd")` нашёл копии модулей.
+
+config_version=5
+
+[application]
+
+config/name="FixerHandoffVerifier"
+config/features=PackedStringArray("4.7")

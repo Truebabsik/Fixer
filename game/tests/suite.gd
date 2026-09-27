@@ -17,7 +17,6 @@ const CASES := [
 	"res://tests/cases/test_content_validator.gd",
 	"res://tests/cases/test_content_loader.gd",
 	"res://tests/cases/test_three_paths.gd",
-	"res://tests/cases/test_handoff_skeleton.gd",
 	"res://tests/cases/test_mission01_delivery.gd",
 	"res://tests/cases/test_scales.gd",
 	"res://tests/cases/test_radio.gd",
@@ -26,12 +25,14 @@ const CASES := [
 	"res://tests/cases/test_movement.gd",
 	"res://tests/cases/test_visibility.gd",
 	"res://tests/cases/test_windows.gd",
+	"res://tests/cases/test_core_v3.gd",
 	"res://tests/cases/test_windows_data.gd",
 	"res://tests/cases/test_sealed_edge.gd",
 	"res://tests/cases/test_response.gd",
 	"res://tests/cases/test_casualties.gd",
 	"res://tests/cases/test_harness.gd",
 	"res://tests/cases/test_package_purity.gd",
+	"res://tests/cases/test_order_builder.gd",
 ]
 
 ## Типы, которые run() не имеет права вернуть. Сравниваем с typeof() вручную,

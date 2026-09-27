@@ -16,6 +16,14 @@ const Fixture := preload("res://tests/fixtures/small_mission.gd")
 ## Нужен ровно для одного ассерта: состав по умолчанию сверяется с умолчанием `Plan`,
 ## чтобы «два бойца» не оказались числом, вписанным в кейс.
 const Plan := preload("res://sim/plan.gd")
+## Нужен ради умолчаний разделов: у модели, собранной БЕЗ payload, раздел-массив обязан
+## существовать пустым (`DATA_ARRAY_SECTIONS`) — это вторая половина проверки маршрутов.
+const Mission := preload("res://sim/mission.gd")
+
+## Метка отсутствующего раздела: пропажа раздела обязана быть ВИДНА сравнению и названа
+## провалом, а не ронять кейс обращением к несуществующему ключу (тот же приём и по той же
+## причине, что `NO_FIELD` в `test_three_paths.gd`; там он держит пары «путь=значение»).
+const NO_FIELD := "ПОЛЯ НЕТ"
 
 
 ## Словарь-двойник фикстуры: тот же граф, но выраженный данными. Все корневые ключи
@@ -49,7 +57,8 @@ func _fixture_data() -> Dictionary:
 		"objective": "archive0",
 		"windows": Fixture.WINDOWS.duplicate(true),
 		"intel": [],
-		"access_points": [],
+		"routes": [{"id": "main", "entry": "dock", "exit": "dock",
+			"route": ["dock", "hall", "office2", "vault", "office2", "hall", "archive0", "hall", "dock"]}],
 	}
 
 
@@ -188,6 +197,57 @@ func run() -> Array:
 	t.eq("окна совпадают по значению", loaded.data["windows"], built.data["windows"])
 	# I3. Название уровня не теряется молча: оно доезжает до модели.
 	t.eq("title_key доехал до модели", String(loaded.data.get("title_key", "")), "mission.small.title")
+
+	# 2в. РАЗДЕЛ МАРШРУТОВ — та же дисциплина, что у окон и `title_key`, и она
+	# ДВУСТОРОННЯЯ, потому что односторонняя вырождается:
+	#   (а) раздел ДОЕХАЛ из загрузчика до `Mission.data`: без этого «поле есть, а данных
+	#       нет» (пустой массив) читалось бы как «всё хорошо»;
+	#   (б) ключ есть у модели, собранной БЕЗ раздела вовсе, — это умолчание
+	#       `Mission.DATA_ARRAY_SECTIONS`. Без (б) раздел, выпавший из списка, выглядел бы
+	#       как «поля нет», то есть отсутствием поля вместо симптома.
+	# Обе половины названы по отдельности: это разные правки, и видеть надо, какая.
+	#
+	# Чтение — через `data.get(..., NO_FIELD)`, а НЕ через `data["routes"]`. Это не стиль,
+	# а условие доказательства: на снятом разделе прямое обращение к ключу роняет `run()`
+	# рантаймом, раннер печатает `LOAD FAIL` и записанные ассерты НЕ возвращает — красное
+	# без имени сломанного правила. Проба P1 (см. отчёт) показала ровно это на первой
+	# редакции строк ниже; с меткой провал называется своим ассертом.
+	t.eq("маршруты доехали до модели", loaded.data.get("routes", NO_FIELD), fixture_data["routes"])
+	var model_routes = loaded.data.get("routes", NO_FIELD)
+	t.is_true("маршруты доехали не пустыми (иначе ассерт выше вырожден)",
+		typeof(model_routes) == TYPE_ARRAY and not (model_routes as Array).is_empty())
+	var bare := Mission.new()
+	t.eq("у миссии без payload маршруты есть и пусты (умолчание разделов)",
+		bare.data.get("routes", NO_FIELD), [])
+
+	# Снятый раздел `access_points` не знает НИ ОДИН из двух входов: ни данные (payload его
+	# не несёт), ни умолчание модели. Ассерты названы порознь по той же причине: «вернули
+	# в payload» и «вернули в списки модели» — две разные правки.
+	t.is_false("в модели нет снятого раздела access_points (из данных)",
+		loaded.data.has("access_points"))
+	t.is_false("в модели нет снятого раздела access_points (умолчание)",
+		bare.data.has("access_points"))
+
+	# Согласие двух списков — отдельными ассертами, а не надеждой на комментарий: список
+	# массивов ФАЙЛА (`Validator.ARRAY_SECTIONS`) — независимый источник правды, и раздел,
+	# который он объявляет, модель обязана знать. Проба P1 (см. отчёт) краснит ЭТОТ ассерт
+	# именем при снятии `routes` из `Mission.DATA_ARRAY_SECTIONS` — то есть проверка названа,
+	# а не пропущена. Жёсткое API миссии (`edges`, `patrols`, `sensors`) из сверки исключено:
+	# оно едет отдельными `add_*` и в списке разделов модели его нет.
+	# Граница названа прямо: ОБРАТНОЕ направление — раздел, добавленный валидатору и не
+	# добавленный модели, — этой сверкой не ловится (фикстуры такого раздела не несут, и
+	# набор краснеет раньше, на валидаторе: проба P6, 104 провала до этого места).
+	var file_sections: Array = []
+	for section in Validator.ARRAY_SECTIONS:
+		if section in ["edges", "patrols", "sensors"]:
+			continue
+		file_sections.append(String(section))
+	t.is_true("сверка списков не пуста (иначе ассерты ниже вырождены)",
+		file_sections.size() > 0)
+	for section in file_sections:
+		t.is_true("массивный раздел файла %s знает и модель" % section,
+			Mission.DATA_ARRAY_SECTIONS.has(section))
+
 	t.is_true("миссия из словаря валидна по mission.validate()", (loaded.validate() as Array).is_empty())
 
 	# 3. Типы: JSON приходит с float-числами, ядро ждёт int.
@@ -214,7 +274,7 @@ func run() -> Array:
 		+ '"nodes":{"a":{"floor":1,"tags":["entry"]},"b":{"floor":1,"tags":[]}},' \
 		+ '"edges":[{"id":"e_ab","a":"a","b":"b","kind":"corridor","steps":1,"noise":0}],' \
 		+ '"patrols":[],"sensors":[],"objective":"b",' \
-		+ '"windows":[],"intel":[],"access_points":[]}'
+		+ '"windows":[],"intel":[],"routes":[{"id":"main","entry":"a","exit":"a","route":["a","b","a"]}]}'
 	var json_texts := {"mission.j.title": "Операция «J»"}
 	for key in Validator.REQUIRED_TEXT_KEYS:
 		json_texts[String(key)] = "ТЕКСТ"
@@ -325,7 +385,7 @@ func run() -> Array:
 	# `_texts_for` берётся от ИСПОРЧЕННОГО словаря: подменённый раздел уносит с собой свои
 	# `*_key`, и словарь остаётся в согласии с данными — иначе к дефекту добавился бы
 	# DANGLING_TEXT на ключи унесённых окон, которого кейс не проверяет.
-	for section in ["patrols", "sensors", "windows", "intel", "access_points"]:
+	for section in ["patrols", "sensors", "windows", "intel", "routes"]:
 		var bad_section := _fixture_data()
 		bad_section[section] = {"не": "массив"}
 		var section_res := Loader.load_mission(bad_section, _texts_for(bad_section))

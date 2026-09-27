@@ -1,0 +1,249 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+=== Приёмка поставки уровня: F:\WORK\Fixer\docs\handoff\2026-09-27-mission-01-delivery\mission-01.json ===
+тексты: F:\WORK\Fixer\docs\handoff\2026-09-27-mission-01-delivery\texts.ru.json
+
+== 1. Форма: боевые content/validator.gd + content/loader.gd ==
+ПРОБЛЕМ: 0
+СОБРАНО: миссия «mission-01», помещений 28, рёбер 35, патрулей 4, сенсоров 6, окон 16, разведка 3, точек доступа 3
+
+== 2. Геометрия схемы: pos, наложения помещений этажа, подписи с текстами ==
+  помещений с координатами: 28, пар одного этажа проверено: 50, нарушений: 0
+
+== 3. Связность и тупики: входы, путь к цели, независимые пути к выходу ==
+перекрываемые тревогой виды рёбер (ядро, sim/response.gd:BLOCKED_KINDS): lift_main, lift_freight
+входы (тег entry): dock1, main_entry1, roof6 (узлов: 3)
+цель: archive0
+ВЫХОД ПЛАНОВ В МАТРИЦЕ = ВХОД МАРШРУТА: группа возвращается туда, откуда пришла
+(своего поля «выход» формат уровня не знает; замер v1 выбирал выход руками, здесь он
+выводится из маршрута, чтобы инструмент годился любой поставке).
+  dock1 → archive0: dock1 → freight1 → freight0 → hall0 → archive0 (рёбер 4)
+    от цели (archive0) к выходу (dock1): простых путей 2; путь без перекрываемых тревогой рёбер: archive0 → hall0 → stair0 → stair1 → lobby1 → dock1
+  main_entry1 → archive0: main_entry1 → lobby1 → stair1 → stair0 → hall0 → archive0 (рёбер 5)
+    от цели (archive0) к выходу (main_entry1): простых путей 2; путь без перекрываемых тревогой рёбер: archive0 → hall0 → stair0 → stair1 → lobby1 → main_entry1
+  roof6 → archive0: roof6 → stair5 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0 (рёбер 8)
+    от цели (archive0) к выходу (roof6): простых путей 2; путь без перекрываемых тревогой рёбер: archive0 → hall0 → stair0 → stair1 → stair2 → stair3 → stair4 → stair5 → roof6
+
+== 4. Маршруты: автоматически построенные BFS + крышечные на каждое окно ==
+  маршрутов уникальных: 38 (с повторами-крышками: 60)
+  ROUTE_ADJACENCY: все пары соседей маршрутов — рёбра собранной модели (нарушений 0)
+
+== 4а. Прогон ядра: маршрут × поведение × сид ==
+поведения: молчание, первый вариант; сиды: [1, 2, 3, 4, 5]; прогонов: 380
+  прогонов состоялось: 380
+
+== 5а. Маршруты матрицы (построены BFS; выход = вход маршрута) ==
+  BASE:dock1               dock1 → freight1 → freight0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_file_read:dock1, W:w_archivist:dock1#1, W:w_basement_cam:dock1, W:w_dock_courier:dock1, W:w_stuck_freight:dock1#2
+  BASE:main_entry1         main_entry1 → lobby1 → stair1 → stair0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_file_read:main_entry1, W:w_archivist:main_entry1#1, W:w_basement_cam:main_entry1, W:w_reception:main_entry1
+  BASE:roof6               roof6 → stair5 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_file_read:roof6, W:w_archivist:roof6#1, W:w_basement_cam:roof6, W:w_stair_run:roof6, W:w_roof_smoke:roof6
+  W:w_archivist:dock1#2    dock1 → freight1 → freight0 → hall0 → archive0 → hall0 → archive0
+  W:w_archivist:main_entry1#2 main_entry1 → lobby1 → stair1 → stair0 → hall0 → archive0 → hall0 → archive0
+  W:w_archivist:roof6#2    roof6 → stair5 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0 → hall0 → archive0
+  W:w_reception:dock1      dock1 → lobby1 → stair1 → stair0 → hall0 → archive0
+  W:w_reception:roof6      roof6 → stair5 → exec5 → lift_main5 → lift_main1 → lobby1 → stair1 → stair0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_secretary:roof6
+  W:w_dock_courier:main_entry1 main_entry1 → lobby1 → dock1 → freight1 → freight0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_stuck_freight:main_entry1#2
+  W:w_dock_courier:roof6   roof6 → stair5 → exec5 → lift_main5 → lift_main1 → lobby1 → dock1 → freight1 → freight0 → hall0 → archive0
+  W:w_stuck_freight:dock1#1 dock1 → freight1 → freight0 → freight1 → freight0 → hall0 → archive0
+  W:w_stuck_freight:main_entry1#1 main_entry1 → lobby1 → dock1 → freight1 → freight0 → freight1 → freight0 → hall0 → archive0
+  W:w_stuck_freight:roof6#1 roof6 → stair5 → stair4 → freight4 → freight3 → freight2 → freight1 → freight0 → freight1 → freight0 → hall0 → archive0
+  W:w_stuck_freight:roof6#2 roof6 → stair5 → stair4 → freight4 → freight3 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_witness:dock1        dock1 → freight1 → freight2 → office2 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_witness:main_entry1  main_entry1 → lobby1 → stair1 → stair2 → office2 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_witness:roof6        roof6 → stair5 → stair4 → stair3 → stair2 → office2 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_lead_found:dock1     dock1 → freight1 → freight2 → term2 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_lead_found:main_entry1 main_entry1 → lobby1 → dock1 → freight1 → freight2 → term2 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_lead_found:roof6     roof6 → stair5 → stair4 → stair3 → stair2 → office2 → term2 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_camera:dock1         dock1 → freight1 → freight2 → freight3 → hall3 → freight3 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_camera:main_entry1   main_entry1 → lobby1 → stair1 → stair2 → stair3 → hall3 → freight3 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_camera:roof6         roof6 → stair5 → stair4 → stair3 → hall3 → freight3 → freight2 → freight1 → freight0 → hall0 → archive0
+  W:w_guard4:dock1         dock1 → freight1 → freight2 → freight3 → freight4 → eng4 → ops4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+  W:w_guard4:main_entry1   main_entry1 → lobby1 → stair1 → stair2 → stair3 → stair4 → ops4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+  W:w_guard4:roof6         roof6 → stair5 → stair4 → ops4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+  W:w_biometry:dock1#1     dock1 → freight1 → freight2 → freight3 → freight4 → eng4 → ops4 → server4 → ops4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_biometry:dock1#2, W:w_cache:dock1
+  W:w_biometry:main_entry1#1 main_entry1 → lobby1 → stair1 → stair2 → stair3 → stair4 → ops4 → server4 → ops4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_biometry:main_entry1#2, W:w_cache:main_entry1
+  W:w_biometry:roof6#1     roof6 → stair5 → stair4 → ops4 → server4 → ops4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+      те же помещения у маршрутов: W:w_biometry:roof6#2, W:w_cache:roof6
+  W:w_stair_run:dock1      dock1 → freight1 → freight2 → freight3 → freight4 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+  W:w_stair_run:main_entry1 main_entry1 → lobby1 → stair1 → stair2 → stair3 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+  W:w_secretary:dock1      dock1 → lobby1 → lift_main1 → lift_main5 → exec5 → lift_main5 → lift_main1 → lobby1 → stair1 → stair0 → hall0 → archive0
+  W:w_secretary:main_entry1 main_entry1 → lobby1 → lift_main1 → lift_main5 → exec5 → lift_main5 → lift_main1 → lobby1 → stair1 → stair0 → hall0 → archive0
+  W:w_answer:dock1         dock1 → lobby1 → lift_main1 → lift_main5 → exec5 → term5 → exec5 → lift_main5 → lift_main1 → lobby1 → stair1 → stair0 → hall0 → archive0
+  W:w_answer:main_entry1   main_entry1 → lobby1 → lift_main1 → lift_main5 → exec5 → term5 → exec5 → lift_main5 → lift_main1 → lobby1 → stair1 → stair0 → hall0 → archive0
+  W:w_answer:roof6         roof6 → stair5 → exec5 → term5 → exec5 → lift_main5 → lift_main1 → lobby1 → stair1 → stair0 → hall0 → archive0
+  W:w_roof_smoke:dock1     dock1 → lobby1 → lift_main1 → lift_main5 → exec5 → stair5 → roof6 → stair5 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+  W:w_roof_smoke:main_entry1 main_entry1 → lobby1 → lift_main1 → lift_main5 → exec5 → stair5 → roof6 → stair5 → stair4 → stair3 → stair2 → stair1 → stair0 → hall0 → archive0
+
+== 5б. Маршрут → сработавшие окна (объединение по прогонам маршрута) ==
+  BASE:dock1               guard_in_sensor:s_hall0(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(10/10), guard_in_sensor:s_hall3(7/10), locked_door:e_freight0_freight1(3/10)
+  BASE:main_entry1         guard_in_sensor:s_hall0(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_hall3(8/10)
+  BASE:roof6               guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), node_entered:stair4(9/10), node_entered:roof6(4/10)
+  W:w_archivist:dock1#2    guard_in_sensor:s_hall0(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(10/10), guard_in_sensor:s_hall3(7/10), locked_door:e_freight0_freight1(3/10)
+  W:w_archivist:main_entry1#2 guard_in_sensor:s_hall0(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_hall3(8/10)
+  W:w_archivist:roof6#2    guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), node_entered:stair4(9/10), node_entered:roof6(4/10)
+  W:w_reception:dock1      guard_in_sensor:s_hall0(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(10/10), node_entered:dock1(6/10)
+  W:w_reception:roof6      guard_in_sensor:s_hall0(10/10), node_entered:exec5(10/10), guard_in_sensor:s_hall3(10/10), node_entered:lobby1(10/10), locked_door:e_hall0_archive0(10/10), guard_in_sensor:s_office2(10/10), node_entered:archive0(10/10), node_entered:roof6(3/10)
+  W:w_dock_courier:main_entry1 guard_in_sensor:s_hall0(10/10), node_entered:dock1(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(10/10), node_entered:lobby1(4/10), locked_door:e_freight0_freight1(6/10)
+  W:w_dock_courier:roof6   guard_in_sensor:s_hall0(10/10), node_entered:exec5(10/10), guard_in_sensor:s_hall3(10/10), node_entered:lobby1(10/10), node_entered:dock1(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(7/10), node_entered:archive0(6/10), locked_door:e_freight0_freight1(8/10)
+  W:w_stuck_freight:dock1#1 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(5/10), locked_door:e_freight0_freight1(1/10)
+  W:w_stuck_freight:main_entry1#1 guard_in_sensor:s_hall0(10/10), node_entered:dock1(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(9/10), locked_door:e_hall0_archive0(9/10), node_entered:archive0(2/10), locked_door:e_freight0_freight1(3/10)
+  W:w_stuck_freight:roof6#1 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_freight0_freight1(10/10)
+  W:w_stuck_freight:roof6#2 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(8/10), node_entered:archive0(3/10), locked_door:e_freight0_freight1(2/10)
+  W:w_witness:dock1        guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), locked_door:e_freight0_freight1(10/10)
+  W:w_witness:main_entry1  guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), guard_in_sensor:s_office2(4/10), locked_door:e_freight0_freight1(4/10)
+  W:w_witness:roof6        guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10)
+  W:w_lead_found:dock1     guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:term2(10/10), locked_door:e_freight0_freight1(10/10)
+  W:w_lead_found:main_entry1 guard_in_sensor:s_hall0(10/10), node_entered:dock1(10/10), guard_in_sensor:s_hall3(10/10), node_entered:term2(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(5/10), node_entered:archive0(1/10), locked_door:e_freight0_freight1(6/10)
+  W:w_lead_found:roof6     guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:term2(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), locked_door:e_freight0_freight1(6/10)
+  W:w_camera:dock1         guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10)
+  W:w_camera:main_entry1   guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10)
+  W:w_camera:roof6         guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10)
+  W:w_guard4:dock1         guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:stair4(10/10), guard_in_sensor:s_office2(10/10)
+  W:w_guard4:main_entry1   guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:stair4(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), node_entered:lobby1(9/10)
+  W:w_guard4:roof6         guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:stair4(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10)
+  W:w_biometry:dock1#1     guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_ops4_server4(10/10), node_entered:server4(10/10), guard_in_sensor:s_office2(10/10), node_entered:stair4(10/10), locked_door:e_hall0_archive0(4/10), node_entered:archive0(4/10)
+  W:w_biometry:main_entry1#1 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:stair4(10/10), locked_door:e_ops4_server4(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), node_entered:server4(10/10), node_entered:lobby1(10/10)
+  W:w_biometry:roof6#1     guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), locked_door:e_ops4_server4(10/10), node_entered:server4(10/10), node_entered:stair4(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(9/10), node_entered:archive0(9/10), node_entered:roof6(2/10)
+  W:w_stair_run:dock1      guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:stair4(10/10), guard_in_sensor:s_office2(10/10)
+  W:w_stair_run:main_entry1 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:stair4(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10), node_entered:lobby1(9/10)
+  W:w_secretary:dock1      guard_in_sensor:s_hall0(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_hall3(10/10), node_entered:exec5(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(4/10), node_entered:archive0(1/10)
+  W:w_secretary:main_entry1 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(10/10), node_entered:archive0(10/10)
+  W:w_answer:dock1         guard_in_sensor:s_hall0(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_hall3(10/10), node_entered:exec5(10/10), node_entered:term5(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(9/10), node_entered:archive0(7/10), node_entered:dock1(2/10)
+  W:w_answer:main_entry1   guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:term5(10/10), node_entered:exec5(10/10), node_entered:lobby1(10/10), locked_door:e_hall0_archive0(6/10), guard_in_sensor:s_office2(7/10)
+  W:w_answer:roof6         guard_in_sensor:s_hall0(10/10), node_entered:exec5(10/10), node_entered:term5(10/10), guard_in_sensor:s_hall3(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_office2(10/10), locked_door:e_hall0_archive0(8/10), node_entered:archive0(6/10)
+  W:w_roof_smoke:dock1     guard_in_sensor:s_hall0(10/10), node_entered:lobby1(10/10), guard_in_sensor:s_hall3(10/10), node_entered:exec5(10/10), node_entered:roof6(10/10), guard_in_sensor:s_office2(10/10), node_entered:stair4(9/10), locked_door:e_hall0_archive0(4/10), node_entered:archive0(4/10), node_entered:dock1(1/10)
+  W:w_roof_smoke:main_entry1 guard_in_sensor:s_hall0(10/10), guard_in_sensor:s_hall3(10/10), node_entered:roof6(10/10), guard_in_sensor:s_office2(10/10), node_entered:stair4(10/10), locked_door:e_hall0_archive0(9/10), node_entered:archive0(9/10), node_entered:exec5(7/10), node_entered:lobby1(5/10)
+  формат: окно(сработало/прогонов маршрута)
+
+== 5в. Матрица исходов: маршрут × поведение (5 сидов) ==
+  маршрут                  поведение      extracted/caught/timeout цель взята   окон за прогон (мин/макс)
+  BASE:dock1               молчание       0/5/0                    5/5          5/5
+  BASE:dock1               первый вариант 0/5/0                    5/5          5/5
+  BASE:main_entry1         молчание       5/0/0                    5/5          5/6
+  BASE:main_entry1         первый вариант 5/0/0                    5/5          6/6
+  BASE:roof6               молчание       1/4/0                    5/5          5/7
+  BASE:roof6               первый вариант 3/2/0                    5/5          6/7
+  W:w_archivist:dock1#2    молчание       0/5/0                    5/5          5/5
+  W:w_archivist:dock1#2    первый вариант 0/5/0                    5/5          5/5
+  W:w_archivist:main_entry1#2 молчание       5/0/0                    5/5          5/6
+  W:w_archivist:main_entry1#2 первый вариант 5/0/0                    5/5          6/6
+  W:w_archivist:roof6#2    молчание       1/4/0                    5/5          5/7
+  W:w_archivist:roof6#2    первый вариант 3/2/0                    5/5          6/7
+  W:w_reception:dock1      молчание       5/0/0                    5/5          6/7
+  W:w_reception:dock1      первый вариант 5/0/0                    5/5          6/7
+  W:w_reception:roof6      молчание       1/4/0                    5/5          7/8
+  W:w_reception:roof6      первый вариант 3/2/0                    5/5          7/8
+  W:w_dock_courier:main_entry1 молчание       0/5/0                    5/5          7/7
+  W:w_dock_courier:main_entry1 первый вариант 0/5/0                    5/5          7/7
+  W:w_dock_courier:roof6   молчание       0/5/0                    3/5          7/9
+  W:w_dock_courier:roof6   первый вариант 0/5/0                    4/5          7/9
+  W:w_stuck_freight:dock1#1 молчание       0/5/0                    5/5          4/5
+  W:w_stuck_freight:dock1#1 первый вариант 0/5/0                    5/5          3/3
+  W:w_stuck_freight:main_entry1#1 молчание       0/5/0                    3/5          5/6
+  W:w_stuck_freight:main_entry1#1 первый вариант 0/5/0                    1/5          5/6
+  W:w_stuck_freight:roof6#1 молчание       0/5/0                    0/5          4/4
+  W:w_stuck_freight:roof6#1 первый вариант 0/5/0                    0/5          4/4
+  W:w_stuck_freight:roof6#2 молчание       0/5/0                    3/5          4/5
+  W:w_stuck_freight:roof6#2 первый вариант 0/5/0                    0/5          4/4
+  W:w_witness:dock1        молчание       0/5/0                    5/5          5/5
+  W:w_witness:dock1        первый вариант 0/5/0                    5/5          5/5
+  W:w_witness:main_entry1  молчание       0/5/0                    5/5          5/5
+  W:w_witness:main_entry1  первый вариант 0/5/0                    5/5          4/5
+  W:w_witness:roof6        молчание       0/5/0                    5/5          5/5
+  W:w_witness:roof6        первый вариант 0/5/0                    5/5          5/5
+  W:w_lead_found:dock1     молчание       0/5/0                    0/5          4/4
+  W:w_lead_found:dock1     первый вариант 0/5/0                    0/5          4/4
+  W:w_lead_found:main_entry1 молчание       0/5/0                    1/5          5/7
+  W:w_lead_found:main_entry1 первый вариант 0/5/0                    0/5          6/7
+  W:w_lead_found:roof6     молчание       0/5/0                    5/5          6/7
+  W:w_lead_found:roof6     первый вариант 0/5/0                    5/5          6/7
+  W:w_camera:dock1         молчание       0/5/0                    0/5          3/3
+  W:w_camera:dock1         первый вариант 0/5/0                    0/5          3/3
+  W:w_camera:main_entry1   молчание       0/5/0                    5/5          5/5
+  W:w_camera:main_entry1   первый вариант 0/5/0                    5/5          5/5
+  W:w_camera:roof6         молчание       0/5/0                    5/5          5/5
+  W:w_camera:roof6         первый вариант 0/5/0                    5/5          5/5
+  W:w_guard4:dock1         молчание       0/5/0                    0/5          4/4
+  W:w_guard4:dock1         первый вариант 0/5/0                    0/5          4/4
+  W:w_guard4:main_entry1   молчание       2/3/0                    5/5          6/7
+  W:w_guard4:main_entry1   первый вариант 2/3/0                    5/5          7/7
+  W:w_guard4:roof6         молчание       0/5/0                    5/5          6/6
+  W:w_guard4:roof6         первый вариант 0/5/0                    5/5          6/6
+  W:w_biometry:dock1#1     молчание       0/5/0                    1/5          6/8
+  W:w_biometry:dock1#1     первый вариант 0/5/0                    3/5          6/8
+  W:w_biometry:main_entry1#1 молчание       3/2/0                    5/5          9/9
+  W:w_biometry:main_entry1#1 первый вариант 4/1/0                    5/5          9/9
+  W:w_biometry:roof6#1     молчание       2/3/0                    4/5          6/9
+  W:w_biometry:roof6#1     первый вариант 3/2/0                    5/5          8/9
+  W:w_stair_run:dock1      молчание       0/5/0                    0/5          4/4
+  W:w_stair_run:dock1      первый вариант 0/5/0                    0/5          4/4
+  W:w_stair_run:main_entry1 молчание       4/1/0                    5/5          6/7
+  W:w_stair_run:main_entry1 первый вариант 5/0/0                    5/5          7/7
+  W:w_secretary:dock1      молчание       0/5/0                    3/5          5/7
+  W:w_secretary:dock1      первый вариант 0/5/0                    0/5          5/5
+  W:w_secretary:main_entry1 молчание       0/5/0                    5/5          6/6
+  W:w_secretary:main_entry1 первый вариант 0/5/0                    5/5          6/6
+  W:w_answer:dock1         молчание       0/5/0                    4/5          6/8
+  W:w_answer:dock1         первый вариант 0/5/0                    4/5          7/9
+  W:w_answer:main_entry1   молчание       0/5/0                    3/5          6/7
+  W:w_answer:main_entry1   первый вариант 0/5/0                    0/5          5/7
+  W:w_answer:roof6         молчание       0/5/0                    4/5          7/8
+  W:w_answer:roof6         первый вариант 0/5/0                    3/5          6/8
+  W:w_roof_smoke:dock1     молчание       1/4/0                    2/5          6/10
+  W:w_roof_smoke:dock1     первый вариант 0/5/0                    2/5          7/9
+  W:w_roof_smoke:main_entry1 молчание       2/3/0                    4/5          5/9
+  W:w_roof_smoke:main_entry1 первый вариант 3/2/0                    5/5          8/9
+
+== 5г. Срабатывающих окон за прохождение (критерий: 5…12, ориентир исполнителя 8–9) ==
+  по всем 380 прогонам матрицы: мин 3, среднее 5.9, макс 10
+  по базовым маршрутам (вход → цель, лучшее прохождение маршрута): BASE:dock1: макс 5, BASE:main_entry1: макс 6, BASE:roof6: макс 7
+  вердикт: каждый базовый маршрут способен показать 5…12 окон, и ни одно
+  прохождение матрицы не показывает больше 12. Ориентир 8–9 — сверка замысла.
+
+== 5д. Окна, не сработавшие ни на одном прогоне матрицы ==
+  w_guard4: вид guard_in_sensor, якорь sensor=s_ops4, объявленный id guard_in_sensor:s_ops4
+      зона сенсора s_ops4: ops4, eng4; патрулей, заходящих в неё: НИ ОДНОГО
+      сенсор срабатывает только на охране, а охрана ходит строго по своему маршруту:
+      в этой зоне не бывает никто — окно не откроется ни при каком прохождении.
+
+== 6. Детерминизм: тот же маршрут + сид + поведение → тот же digest ==
+  BASE:dock1 / сид 1 / молчание: digest повтора СОВПАЛ первому
+      отпечаток 1: outcome=caught|steps=23|objective_done=true|orders_left=3|noise=33|radio=0|imprint=0|alarm=2|injured=["kira", "echo"]|dead=[]|positions={ "kira": "freight1", "echo": "freight1", "guard_1": "lobby1", "guard_2": "term2", "guard_3": "hall3", "guard_4": "hall0" }
+      отпечаток 2: outcome=caught|steps=23|objective_done=true|orders_left=3|noise=33|radio=0|imprint=0|alarm=2|injured=["kira", "echo"]|dead=[]|positions={ "kira": "freight1", "echo": "freight1", "guard_1": "lobby1", "guard_2": "term2", "guard_3": "hall3", "guard_4": "hall0" }
+
+== 7. Критерии приёмки: имя — факт — требование — вердикт (имена дословно из design.md §3) ==
+  FORM                        выполнен
+      факт:        проблем формы 0, миссия собрана
+      требование:  0 проблем формы, миссия собирается
+  GEOMETRY                    выполнен
+      факт:        нарушений: 0; помещений с pos 28, пар этажа 50
+      требование:  pos у всех помещений, зазор ≥ 4 (коробка 3×3), подписи/этажи/комплекс с текстами
+  ENTRIES_DECLARED            выполнен
+      факт:        узлов с тегом entry: 3
+      требование:  не меньше трёх
+  OBJECTIVE_FROM_EVERY_ENTRY  выполнен
+      факт:        входов с взятой целью: 3 из 3
+      требование:  от КАЖДОГО входа есть прогон, где группа берёт цель (objective_done)
+  EXIT_REACHED                выполнен
+      факт:        входов с исходом extracted: 3 из 3
+      требование:  на КАЖДОМ входе есть прогон с исходом extracted
+  FAILURE_REACHABLE           выполнен
+      факт:        прогонов с исходом caught: 307 из 380
+      требование:  существует прогон с исходом caught
+  TWO_INDEPENDENT_EXITS       выполнен
+      факт:        dock1: путей 2, без перекрываемых рёбер есть; main_entry1: путей 2, без перекрываемых рёбер есть; roof6: путей 2, без перекрываемых рёбер есть
+      требование:  от цели к выходу ≥ 2 простых путей И есть путь без рёбер видов lift_main, lift_freight
+  WINDOW_FIRED_AT_LEAST_ONCE  НАРУШЕН
+      факт:        объявленных окон: 16; сработало 15; ни разу: w_guard4 (guard_in_sensor, sensor=s_ops4)
+      требование:  каждое объявленное окно срабатывает хотя бы на одном прогоне матрицы
+  FIRING_RANGE                выполнен
+      факт:        лучшее прохождение базовых маршрутов: BASE:dock1: макс 5, BASE:main_entry1: макс 6, BASE:roof6: макс 7; по всем прогонам мин 3, среднее 5.9, макс 10
+      требование:  срабатывающих окон за прохождение 5…12 (ориентир 8–9 печатается отдельно)
+
+ИТОГ ПРИЁМКИ: нарушены критерии: WINDOW_FIRED_AT_LEAST_ONCE (код 1)

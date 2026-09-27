@@ -10,7 +10,7 @@ extends RefCounted
 ##                    рёбра со всеми семью полями, патрули, сенсоры;
 ##   2. `data`      — разделы контента; перечень берётся из `Mission.DATA_SECTIONS`
 ##                    (единственный источник правды), а не переписывается здесь руками:
-##                    windows, intel, access_points, texts, title_key.
+##                    windows, intel, routes, texts, title_key.
 ##                    Это ОТДЕЛЬНОЕ представление: отпечаток прогона может совпасть при
 ##                    расхождении `data` и наоборот, поэтому сверка нужна и по нему;
 ##   3. ПЛАН        — вторая половина третьей точки входа: `load_mission` (миссия) ПЛЮС
@@ -61,10 +61,10 @@ const NO_FIELD := "ПОЛЯ НЕТ"
 ## Цена названа прямо: правка окон в фикстуре требует такой же правки здесь — и провал
 ## называет поле, а не «модели не равны».
 ##
-## Разделы `intel` и `access_points` НЕ пустые намеренно. Пустой раздел проходит сравнение
+## Разделы `intel` и `routes` НЕ пустые намеренно. Пустой раздел проходит сравнение
 ## «в обе стороны» независимо от того, кладёт ли загрузчик раздел в модель вообще:
 ## доказательство было бы вырожденным ровно на тех двух разделах, которые в прошлый раз
-## не сравнивались. `ap.…` — тексты к точке доступа, тоже непустые.
+## не сравнивались. Точки доступа из формы убраны: терминал выражается вариантом окна.
 ##
 ## Копии (`duplicate(true)`) обязательны на каждом обращении: `load_mission` не мутирует
 ## вход (это проверено), но кейс не должен разделять состояние между кругами и пробами.
@@ -123,10 +123,8 @@ func _canonical() -> Dictionary:
 			"observed_at": 0,
 			"entries": [{"kind": "sensor", "nodes": ["hall"], "age_hours": 8, "false": false}],
 		}],
-		"access_points": [{"id": "ap_hall", "node": "hall", "kind": "terminal",
-			"text_key": "ap.ap_hall.text",
-			"actions": [{"id": "copy", "text_key": "ap.ap_hall.copy", "complexity": 1,
-				"cost": {"steps": 4}, "effects": [{"type": "noop"}]}]}],
+		"routes": [{"id": "main", "entry": "dock", "exit": "dock",
+			"route": ["dock", "hall", "office2", "vault", "office2", "hall", "archive0", "hall", "dock"]}],
 	}
 
 
@@ -368,9 +366,12 @@ func run() -> Array:
 	var texts := _canonical_texts(_canonical())
 	t.is_true("канон: тексты непусты (иначе сверка ключей была бы пустой)", texts.size() > 0)
 	# Ключи `*_key` канона лежат и вне окон, поэтому «тексты непусты» — не только про окна.
+	# Точка доступа из формы убрана: её тексты (`ap.*`) ушли вместе с разделом, а действие
+	# терминала выражается вариантом окна — то есть тем же полем `options[].text_key`,
+	# которое проверяет второй ассерт ниже (по ключу ОКНА, а не терминала).
 	t.is_true("канон: title_key попал в тексты", texts.has("mission.small.title"))
-	t.is_true("канон: текст точки доступа попал в тексты", texts.has("ap.ap_hall.text"))
-	t.is_true("канон: текст действия точки доступа попал в тексты", texts.has("ap.ap_hall.copy"))
+	t.is_true("канон: текст варианта окна попал в тексты", texts.has("window.w_locked_door.breach"))
+	t.is_true("канон: текст базового молчания попал в тексты", texts.has("window.w_locked_door.silence"))
 
 	# --- 0б. Канонический вид не вырожден на нестроковом ключе ------------------------
 	# Нестроковый ключ словаря — тот же класс, что «ассерт, который не может покраснеть»:
@@ -424,7 +425,7 @@ func run() -> Array:
 	by_code.set_data({
 		"windows": _canonical()["windows"],
 		"intel": _canonical()["intel"],
-		"access_points": _canonical()["access_points"],
+		"routes": _canonical()["routes"],
 		"texts": texts.duplicate(true),
 		"title_key": String(_canonical()["title_key"]),
 	})
@@ -466,15 +467,28 @@ func run() -> Array:
 	# Терять при этом нечего и в другую сторону: пропажу раздела у ПУТИ «СЛОВАРЬ» ловит
 	# `_compare_payload` («intel — размер»/«— значение», проба «загрузчик отдаёт `[]`»),
 	# а не снятые ассерты: у пути «код» раздел приходит из канона, у словаря — из загрузчика.
-	t.is_true("data: разделы непусты — окна, разведка, точки доступа, тексты",
+	t.is_true("data: разделы непусты — окна, разведка, тексты",
 		not by_dict.data["windows"].is_empty() and not by_dict.data["intel"].is_empty()
-		and not by_dict.data["access_points"].is_empty() and not by_dict.data["texts"].is_empty())
+		and not by_dict.data["texts"].is_empty())
 	t.eq("data: окон ровно столько, сколько в каноне",
 		(by_dict.data["windows"] as Array).size(), (_canonical()["windows"] as Array).size())
 	t.eq("data: окна (словарь) равны канону", by_dict.data["windows"], _canonical()["windows"])
 	t.eq("data: разведка (словарь) равна канону", by_dict.data["intel"], _canonical()["intel"])
-	t.eq("data: точки доступа (словарь) равны канону", by_dict.data["access_points"],
-		_canonical()["access_points"])
+	## Маршруты ЕДУТ в `payload`, и это проверяется, а не подразумевается: раздел объявлен
+	## в `Mission.DATA_ARRAY_SECTIONS` (перенос раздела в модель — правка ядра, сделанная
+	## отдельной задачей), поэтому все три пути кладут его в `data`. Ассерт называет оба
+	## конца: раздел ЕСТЬ у каждого пути (иначе «доехал» держалось бы на одном пути) и он
+	## НЕПУСТ — иначе `has("routes")` был бы верен и на пустом умолчании модели. Размер и
+	## значение сверяет `_compare_payload` выше — по `Mission.DATA_SECTIONS`, а не по
+	## списку, переписанному здесь руками.
+	t.is_true("data: маршруты доехали в payload из всех трёх путей",
+		by_dict.data.has("routes") and by_code.data.has("routes") and by_json.data.has("routes"))
+	## Значение читается через `get(..., NO_FIELD)`: снятый раздел обязан назваться ЭТИМ
+	## ассертом, а не уронить `run()` обращением к несуществующему ключу (тогда раннер
+	## печатает `LOAD FAIL`, и провал перестаёт называть сломанное правило).
+	var dict_routes = by_dict.data.get("routes", NO_FIELD)
+	t.is_true("data: маршруты в payload непусты (иначе ассерт выше вырожден)",
+		typeof(dict_routes) == TYPE_ARRAY and not (dict_routes as Array).is_empty())
 	# У JSON-пути строгого равенства канону НЕТ и быть не может: числа в `data` приходят
 	# float (`3.0`), и `Dictionary ==` на `3.0` против `3` — ложь. Его сторона сверяется
 	# с каноном через канонический вид в `_compare_payload` выше; здесь сравнение формы

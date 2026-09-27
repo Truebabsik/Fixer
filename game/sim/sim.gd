@@ -9,11 +9,22 @@ const Agent := preload("res://sim/agent.gd")
 const Scales := preload("res://sim/scales.gd")
 const Radio := preload("res://sim/radio.gd")
 const Response := preload("res://sim/response.gd")
+const Understanding := preload("res://sim/understanding.gd")
 ## Имя константы не может быть `Window`: в Godot 4.7 это тень нативной ноды
 ## и жёсткая ошибка разбора. Смысл `Window.locked_door` сохранён дословно.
 const WindowScript := preload("res://sim/window.gd")
 
 const MAX_STEPS := 500
+
+## Виды эффектов, которые ядро ИСПОЛНЯЕТ. Список живёт ЗДЕСЬ, рядом с применятелем
+## (`_apply_effect`), и форма спрашивает его оттуда (`content/validator.gd`), а не держит
+## свою копию: две копии расходятся молча — ровно так `noop` уже разошёлся (был у формы
+## и не назван у ядра).
+##
+## `noop` стоит в списке осознанно и ветки в `_apply_effect` не имеет: это ЗАЯВЛЕННОЕ
+## «ничего не делать» (пустой эффект в данных), а не забытая ветка. Любой вид вне списка
+## форма отвергает: новое поведение входит через `engine_proposal`, а не «молча ничего».
+const EFFECT_TYPES := ["unlock", "noise", "delay", "noop", "engine_proposal", "money", "trace", "mark"]
 
 var mission
 var plan
@@ -38,6 +49,16 @@ var compromised_at: Dictionary = {}
 var fired_windows: Dictionary = {}
 var fired_edges: Dictionary = {}
 var orders_left: int = 3
+## Счётчики и метки эффектов (D49). Копятся ТОЛЬКО в `_apply_effect` — одной ветке
+## применения эффектов, которая обслуживает варианты окна, четыре исхода молчания и
+## `fallback` заявки. Вторая ветка применения означала бы, что часть мест эффекты
+## «принимает», а часть — нет, то есть ровно тот дефект, из-за которого счётчиков
+## не существовало вовсе (`docs/desions.md` D49).
+var money: int = 0
+var trace: int = 0
+## Метки — множество фактов («взяли копию», «видели ответ»), а не счётчик: повтор
+## эффекта оставляет одну запись. В результат уходят отсортированными (`marks_sorted`).
+var marks: Array[String] = []
 var rng := RandomNumberGenerator.new()
 var current_window = null
 var objective_done := false
@@ -53,6 +74,9 @@ func setup(mission_, plan_, config := {}) -> void:
 	mission = mission_
 	plan = plan_
 	orders_left = int(config.get("orders", 3))
+	money = 0
+	trace = 0
+	marks = []
 	rng.seed = int(config.get("seed", 1))
 	scales = Scales.new()
 	radio = Radio.new()
@@ -137,6 +161,9 @@ func advance() -> Array:
 		response.engage(scales.step)
 		_emit("alarm_raised", {"step": scales.step})
 	_advance_own()
+	## Зона считается ПОСЛЕ движения своих: экранированное помещение важно тогда, когда
+	## в нём кто-то есть, а не тогда, когда группа туда собиралась (`_refresh_shield`).
+	_refresh_shield()
 	_advance_guards()
 	_update_visibility()
 	_check_contacts()
@@ -176,11 +203,26 @@ func result() -> Dictionary:
 		"radio": radio.radio,
 		"imprint": radio.imprint,
 		"alarm": scales.alarm_state(),
+		## Эффекты-счётчики и метки (D49): на них смотрят «Итоги» (П2), а не события,
+		## поэтому они обязаны быть в отчёте прогона, а не только в журнале.
+		"money": money,
+		"trace": trace,
+		"marks": marks_sorted(),
 		"injured": injured,
 		"dead": dead,
 		"escaped": escaped,
 		"positions": _positions(),
 	}
+
+
+## Метки результата — по алфавиту (`plan.md` §«Контракт»). Порядок постановки меток
+## зависит от порядка окон и вариантов в данных, то есть от того, что к отпечатку
+## отношения не имеет: один и тот же набор фактов обязан читаться одинаково.
+## Копия обязательна — сортировка результата не имеет права переставлять состояние Sim.
+func marks_sorted() -> Array[String]:
+	var out: Array[String] = marks.duplicate()
+	out.sort()
+	return out
 
 
 func _positions() -> Dictionary:
@@ -675,14 +717,26 @@ func order(option_id: String) -> Dictionary:
 	if orders_left <= 0:
 		_emit("order_refused", {"window": w["id"], "reason": "no_orders"})
 		return {"accepted": false, "reason": "no_orders"}
+	## Право голоса проверяется ОДНИМ условием, а причина отказа называется раздельно:
+	## замолчать можно двумя способами — канал заглушён порогом эфира и эфир мёртв в
+	## экранированном помещении (D50). Игрок обязан видеть, что именно его замолчало,
+	## а отказ — не закрытие окна: окно остаётся, и его закрывает молчание (D37).
+	_refresh_shield()
 	if not radio.can_speak(scales.step):
-		_emit("order_refused", {"window": w["id"], "reason": "jammed"})
-		return {"accepted": false, "reason": "jammed"}
+		var reason := "shielded" if radio.shielded else "jammed"
+		_emit("order_refused", {"window": w["id"], "reason": reason})
+		return {"accepted": false, "reason": reason}
 	orders_left -= 1
 	var tx: Dictionary = radio.transmit(scales.step)
-	_apply_option(w, option_id)
+	var literal: Dictionary = _apply_option(w, option_id)
 	current_window = null
 	_emit("order_issued", {"window": w["id"], "option": option_id, "radio": tx})
+	## Буквальность видна в журнале ОТДЕЛЬНЫМ событием и ПОСЛЕ приказа: приказ состоялся,
+	## и уж потом выяснилось, что исполнен он ровно как сказано (D51). Надбавка к этому
+	## моменту уже применена — как и у `agent_moved`, событие описывает случившееся,
+	## а не служит ему причиной. Кубика здесь нет: разрыв детерминирован (D31).
+	if not literal.is_empty():
+		_emit("order_literal", literal)
 	return {"accepted": true, "kind": "order", "transmit": tx}
 
 
@@ -708,22 +762,105 @@ func _resolve_silence(w: Dictionary) -> Dictionary:
 	return {"by": "comms", "quality": "bad"}
 
 
-## Приказ из окна. Порядок применения фиксирован: сначала цена варианта, потом его
-## эффекты. Все эффекты идут через один применятель, чтобы правило жило в одном
-## месте, а не порознь в приказе и молчании.
-func _apply_option(w: Dictionary, option_id: String) -> void:
+## Приказ из окна. Порядок применения фиксирован: сначала цена варианта, потом надбавка
+## за буквальность (она — часть цены, D51), потом эффекты. Все эффекты идут через один
+## применятель, чтобы правило жило в одном месте, а не порознь в приказе и молчании.
+##
+## Возвращает данные события `order_literal` (пустой словарь — исполнено как задумано):
+## событие публикует `order()`, а решение о буквальности принимается здесь, где известен
+## выбранный вариант.
+func _apply_option(w: Dictionary, option_id: String) -> Dictionary:
 	var chosen: Dictionary = {}
 	for o in w["options"]:
 		if String(o["id"]) == option_id:
 			chosen = o
 	if chosen.is_empty():
-		return
+		return {}
 	_apply_cost(w, chosen)
+	var literal := _apply_literal(w, chosen, option_id)
 	for effect in chosen.get("effects", []):
 		_apply_effect(w, effect)
+	return literal
 
 
-## Цена варианта: `cost.noise` и `cost.delay` из данных (прежде — поля варианта).
+## Надбавка за буквальное исполнение (D51): `complexity` выбранного варианта против
+## Понимания окна. Вариант ИСПОЛНЯЕТСЯ — буквальность не провал, а цена; поэтому надбавка
+## ложится тем же `_apply_cost`, что и цена варианта, до его эффектов.
+##
+## Актор надбавки — тот же, кому достаётся `delay` варианта (`_apply_delay`): задержка
+## есть цена ПРИКАЗА, а не свойство бойца, поэтому её платит актор окна, а не самое слабое
+## звено, из-за которого она возникла.
+func _apply_literal(w: Dictionary, chosen: Dictionary, option_id: String) -> Dictionary:
+	var understanding := window_understanding()
+	if understanding < 0:
+		## Живых своих нет — исполнять некому, и буквальности не у кого случиться.
+		## Приказ при этом принимается и списывается: конец миссии наступает по своим
+		## правилам (`_check_end`), а не по «нет живых» в окне.
+		return {}
+	var complexity := int(chosen.get("complexity", 1))
+	var cost: Dictionary = Understanding.literal_cost(complexity, understanding)
+	if cost.is_empty():
+		return {}
+	_apply_cost(w, cost)
+	return {
+		"window": String(w["id"]),
+		"option": option_id,
+		"complexity": complexity,
+		"understanding": understanding,
+		"noise": int(cost["noise"]),
+		"delay": int(cost["delay"]),
+	}
+
+
+## Понимание ОКНА — минимум по живым своим: приказ исполняет самое слабое звено группы,
+## а не тот, кто его отдал, и не средний по отряду (D51). −1 — живых нет, исполнять некому.
+func window_understanding() -> int:
+	var worst := -1
+	for a in own:
+		if a.is_dead():
+			continue
+		if worst < 0 or int(a.understanding) < worst:
+			worst = int(a.understanding)
+	return worst
+
+
+## Есть ли ЖИВОЙ свой в экранированном помещении (D50). Мёртвый голоса не отнимает:
+## правило — про то, что кто-то в зоне не может говорить, а не про то, что там лежит тело.
+func in_shielded_zone() -> bool:
+	for a in own:
+		if a.is_dead():
+			continue
+		if _node_has_tag(String(a.node), "shielded"):
+			return true
+	return false
+
+
+## Есть ли у помещения тег. Список тегов открытый (`entry`, `shielded`, `locked_room`):
+## ядро спрашивает ИМЯ тега, а не перечисляет известные ему виды, иначе новый тег
+## контента потребовал бы правки ядра. Отсутствующее помещение и мусор в `tags` —
+## не тег: миссию собирает конвейер, а падать ядру на неполных данных нечем.
+##
+## Живёт здесь, а не в `Mission`, намеренно: `sim/mission.gd` входит в комплект наружу,
+## и кейс самодостаточности пакета (`test_package_purity.gd`) требует побайтового равенства
+## боевого модуля и его копии в комплекте. Правка модели миссии ради одного вопроса ядра
+## уронила бы чужие ворота и потребовала бы правки пакета — то есть работы вне зоны ядра.
+func _node_has_tag(node_id: String, tag: String) -> bool:
+	var node = mission.nodes.get(node_id, null)
+	if typeof(node) != TYPE_DICTIONARY:
+		return false
+	var tags = (node as Dictionary).get("tags", [])
+	return typeof(tags) == TYPE_ARRAY and (tags as Array).has(tag)
+
+
+## Пересчитать признак мёртвого эфира. Радио о помещениях и позициях не знает — знает ядро,
+## и оно же кладёт ответ туда, откуда его читают `can_speak` и причина отказа `order()`.
+func _refresh_shield() -> void:
+	radio.shielded = in_shielded_zone()
+
+
+## Цена: `noise` и `delay` из словаря цены (прежде — поля варианта). Тот же путь несёт
+## и надбавку за буквальность (`_apply_literal`) — у цены приказа одно применение,
+## сколько бы слагаемых в неё ни входило.
 func _apply_cost(w: Dictionary, chosen: Dictionary) -> void:
 	var noise := int(chosen.get("noise", 0))
 	if noise > 0:
@@ -741,6 +878,11 @@ func _apply_silence(w: Dictionary, eff: Dictionary) -> void:
 
 ## Один применятель эффектов из данных: цена варианта, эффекты молчания и
 ## `fallback` заявки на новую механику (`02-format.md` §4.4, §7).
+##
+## Счётчики `money`/`trace` и метки `mark` копятся ЗДЕСЬ и только здесь (D49): эффекты
+## приходят из вариантов окна, из четырёх исходов молчания и из `fallback` заявки, а
+## `fallback` вызывает тот же применятель — значит место применения одно по построению,
+## а не по договорённости.
 func _apply_effect(w: Dictionary, effect) -> void:
 	if typeof(effect) != TYPE_DICTIONARY:
 		return
@@ -754,6 +896,17 @@ func _apply_effect(w: Dictionary, effect) -> void:
 				scales.add_noise(added)
 		"delay":
 			_apply_delay(w, int(effect_dict.get("value", 0)))
+		"money":
+			money += int(effect_dict.get("value", 0))
+		"trace":
+			trace += int(effect_dict.get("value", 0))
+		"mark":
+			## Метка — факт, а не счётчик: повтор того же имени не двоит запись.
+			## Пустое имя меткой не является (это ошибка формы, а не «метка без имени»),
+			## и в результат ему ехать нечем.
+			var mark_id := String(effect_dict.get("id", ""))
+			if mark_id != "" and not marks.has(mark_id):
+				marks.append(mark_id)
 		"engine_proposal":
 			## Ядро заявку не исполняет и ничего не «дорисовывает»: применяется
 			## `fallback` — то, что делает уровень проходимым уже сегодня (§7).
