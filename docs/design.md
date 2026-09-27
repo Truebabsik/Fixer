@@ -377,7 +377,7 @@
 ## 25. Что экрану операции нужно от данных
 
 Разбор по макету `docs/current/ui-operation-screen.svg` и коду ядра:
-[2026-09-27-mission-01-accept/design-presentation-data.md](current/2026-09-27-mission-01-accept/design-presentation-data.md).
+[2026-09-27-mission-01-accept/design-presentation-data.md](archive/2026-09-27-mission-01-accept/design-presentation-data.md).
 Коротко, потому что это определяет **форму контента**, которую отдаём наружу:
 
 **Новые поля формы (обязательны в пакете обогащения уровня):**
