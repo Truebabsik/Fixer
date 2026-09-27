@@ -97,7 +97,7 @@ func _brief(problems: Array) -> String:
 ## системные (04-texts.md §4). Скелет — образец ФОРМЫ миссии, и системных текстов он не
 ## несёт; но сверка текстов-словарём требует их наличия, а обещание README («скелет
 ## проходит наш валидатор») обязано остаться правдой. Список берётся у валидатора, эталон
-## его перечня — в кейсе валидатора (§14): так расхождение этих двух списков краснит
+## перечня постановки — в кейсе валидатора (§14): так расхождение этих двух списков краснит
 ## ассерт с именем ключа, а не молчит.
 func _fixture_texts() -> Dictionary:
 	var out := SKELETON_TEXTS.duplicate()
@@ -169,9 +169,10 @@ func run() -> Array:
 	var expected_missing: Array = []
 	for _i in data_text_keys.size():
 		expected_missing.append(Problems.MISSING_TEXT)
-	## Ключ, лежащий И в данных, И в обязательном списке (`mission.01.title`), назван здесь
-	## ОДИН раз — как `MISSING_TEXT` на своём поле: `_check_required_texts` второго диагноза
-	## ему не выписывает.
+	## Ключ, лежащий в данных (название миссии через `title_key`), назван здесь ОДИН раз — как
+	## `MISSING_TEXT` на своём поле: `_check_required_texts` пропускает ключи, на которые
+	## сослались данные, а в обязательном перечне названия миссии нет вовсе (номер миссии в
+	## конвейерной константе давал ложный диагноз следующей миссии, `review-03` §7.5).
 	for key in Validator.REQUIRED_TEXT_KEYS:
 		if not _key_in(data_text_keys, String(key)):
 			expected_missing.append(Problems.MISSING_REQUIRED_TEXT)

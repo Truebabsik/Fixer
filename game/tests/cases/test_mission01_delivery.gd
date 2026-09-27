@@ -256,8 +256,10 @@ func run() -> Array:
 	# Ассерт дублирует часть работы валидатора намеренно: он называет ПРОПАВШИЙ КЛЮЧ,
 	# а не «список проблем непуст», и потому краснеет ровно на том ключе, который унесли.
 	#
-	# Список берётся у валидатора; независимый эталон тех же 32 ключей и доказательство,
-	# что список валидатора не короче эталона, — в `test_content_validator.gd` (§14).
+	# Список берётся у валидатора; независимый эталон тех же 32 ключей — в
+	# `test_content_validator.gd` (§14), там же доказано, что каждый из них получает ровно
+	# ОДИН диагноз: 31 ключ — обязательным перечнем, название миссии — сверкой `title_key`
+	# (номер миссии в конвейерной константе дал бы ложный диагноз следующей миссии).
 	# Здесь проверяется ДРУГАЯ половина: список валидатора не длиннее поставки.
 	var required_gaps: Array = []
 	for key in Validator.REQUIRED_TEXT_KEYS:
@@ -477,6 +479,54 @@ func run() -> Array:
 	t.eq("базовый текст молчания верен при любом качестве и не называет решающего: %s"
 		% _join(base_named), base_named, [])
 
+	# 4в. РЕШАЮЩИЙ В КАЧЕСТВЕННОМ ТЕКСТЕ. `safe` выпадает только без живого связиста, и
+	# решает в нём тактик (D7, D41), поэтому строка `safe` обязана называть Киру — как
+	# базовая строка обязана НЕ называть никого (4б). Проверяются ОБЕ половины правила: и
+	# «назван связист» (ложь о решающем), и «не назван тактик». До этого ассерта строку не
+	# держало ничто: ключ качества проверялся только на НАЛИЧИЕ текста (4а), и подмена имени
+	# в нём не краснила ничего. Провал называет окно и сам текст, счётчик окон — сторож
+	# вырождения.
+	#
+	# Исключение одно, и оно ПРОВЕРЯЕТСЯ, а не подразумевается: у `w_stuck_lift` решать
+	# некому вовсе (все четыре исхода — «по инструкции»), и в его `safe` нет ни Кира, ни Эхо.
+	# Без этой половины ассерт «не называет связиста» проходил бы и на строке «Никто ничего
+	# не делает».
+	var safe_comms: Array = []
+	var safe_nameless: Array = []
+	var safe_stuck_nameless := false
+	var safe_windows := 0
+	for w in windows:
+		if typeof(w) != TYPE_DICTIONARY:
+			continue
+		var silence = w.get("silence", null)
+		if typeof(silence) != TYPE_DICTIONARY:
+			continue
+		safe_windows += 1
+		var wid := str(w.get("id", "?"))
+		var raw_safe = (silence as Dictionary).get("safe_key", "")
+		if typeof(raw_safe) != TYPE_STRING or String(raw_safe) == "":
+			safe_comms.append("%s: нет ключа текста safe" % wid)
+			continue
+		var safe_text = (texts as Dictionary).get(String(raw_safe), "")
+		if typeof(safe_text) != TYPE_STRING or String(safe_text) == "":
+			safe_comms.append("%s: нет текста «%s»" % [wid, String(raw_safe)])
+			continue
+		var safe_str := String(safe_text)
+		if safe_str.contains("Эхо"):
+			safe_comms.append("%s: текст safe называет связиста — «%s»" % [wid, safe_str])
+		if safe_str.contains("Кира"):
+			continue
+		if wid == "w_stuck_lift":
+			safe_stuck_nameless = not safe_str.contains("Эхо")
+			continue
+		safe_nameless.append("%s: текст safe не называет тактика — «%s»" % [wid, safe_str])
+	t.eq("окон, у которых прочитан текст safe", safe_windows, DELIVERY_WINDOWS)
+	t.eq("текст safe не называет связиста: %s" % _join(safe_comms), safe_comms, [])
+	t.eq("текст safe называет тактика (Кира) — во всех окнах, кроме w_stuck_lift: %s"
+		% _join(safe_nameless), safe_nameless, [])
+	t.is_true("исключение не выдумано: в `safe` окна w_stuck_lift не назван никто",
+		safe_stuck_nameless)
+
 	# 5. Окно у двери: `unlock` стоит во ВСЕХ четырёх исходах молчания (D37/D38 —
 	# «молчание не проваливает миссию»). Валидатор требует лишь ОДИН открывающий исход
 	# (`UNWINNABLE_EDGE` — про тупик), поэтому три из четырёх он пропустит: этот ассерт
@@ -598,6 +648,29 @@ func run() -> Array:
 	t.eq("собранная модель без проблем Mission.validate: %s"
 		% ("; ".join(model_problems) if not model_problems.is_empty() else "(проблем нет)"),
 		model_problems, [])
+
+	# 10а. ГЕОМЕТРИЯ ЦЕЛИ — проверяемое утверждение документа (`scales.md` §10.1, предложение 1).
+	# Прежняя фраза «`exit_node` обязан быть смежен цели (у `archive0` это только `hall0`)»
+	# была ЛОЖНОЙ, и правка задачи 9 исправила её в теле: рёбер у цели два, а «только `hall0`»
+	# относится к другому утверждению — «со стороны выхода к цели ведёт только `hall0`».
+	# Проверяемая половина исправленной фразы такая: соседей у цели РОВНО два — `hall0` и
+	# `it_open4`, и `hall0` — тот выход, на котором снят замер (`measure_mission01.gd:EXIT_NODE`;
+	# маршруты `A_2floor` и `C_roof` входят в цель именно через него). Непроверяемую половину
+	# («сторона выхода») ассерт за собой не берёт: уровня этого не хранят — выход выбирает
+	# замысел, и проба других выходов живёт в инструменте замера (раздел 4г).
+	var goal_id := str(data["objective"])
+	t.eq("цель поставки — archive0: кейс про геометрию именно этой цели", goal_id, "archive0")
+	var goal_neighbours: Array = []
+	for e in (data["edges"] as Array):
+		if String(e["a"]) == goal_id:
+			goal_neighbours.append(String(e["b"]))
+		elif String(e["b"]) == goal_id:
+			goal_neighbours.append(String(e["a"]))
+	goal_neighbours.sort()
+	t.eq("у цели archive0 соседей ровно два — hall0 и it_open4 (а не «только hall0»)",
+		goal_neighbours, ["hall0", "it_open4"])
+	t.is_true("выход матрицы замера (hall0) смежен цели: правило 1 отхода к нему применимо",
+		goal_neighbours.has("hall0"))
 
 	# 11. КООРДИНАТЫ НЕ ВЛИЯЮТ НА СИМУЛЯЦИЮ. Прогон миссии с полями презентации и прогон
 	# той же миссии с ВЫРЕЗАННЫМИ полями обязаны дать один и тот же `harness.digest`:

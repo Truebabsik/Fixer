@@ -152,6 +152,85 @@ func run() -> Array:
 	t.eq("отставший ждёт его на выходе", outside.own[1].node, "z")
 	t.eq("миссия завершилась уходом", String(outside.result()["outcome"]), "extracted")
 
+	# 10. ПРАВИЛО 0 «агент уже в выходе» НА ДОСТИЖИМЫХ СОСТОЯНИЯХ ПОВТОРЯЕТ ПРАВИЛО 2.
+	# Ревью 3 (находка §7.1) сняло половину `here == exit_node` — набор остался зелёным
+	# (1134/0), и это не «мёртвый код»: причина у подмены структурная, и она здесь
+	# проверяется, а не объявляется. Инвариант: `waypoint_index` всегда указывает на
+	# ТЕКУЩИЙ узел (`plan.route[waypoint_index - 1] == a.node`), потому что `setup` даёт
+	# `waypoints` копией `plan.route` (`sim.gd:100`), а `_advance_own` растит узел и индекс
+	# вместе (`sim.gd:225–226`). Следствие: у стоящего в выходе агента выход оказывается на
+	# ЕГО ЖЕ индексе, `_exit_ahead` находит его там и отдаёт `[выход]` — ровно то же, что
+	# правило 0. Проверка идёт ДО шага и только до взятой цели: после неё агентам выдают
+	# путь отхода, и индекс с узлом расходятся законно (`_check_objective`).
+	#
+	# Выход здесь — первый узел маршрута, и отставший стоит в нём всё время до взятия цели:
+	# это ровно та форма, для которой правило 0 написано, и её видно в ассерте ниже.
+	var inv = _make_corridor("start", 5)
+	var inv_checked := 0
+	var inv_stood_in_exit := false
+	while not inv.objective_done and inv.scales.step < 20:
+		for a in inv.own:
+			if a.is_dead():
+				continue
+			t.is_true("инвариант отхода: узел агента — тот, на который указывает индекс маршрута (шаг %d)"
+				% inv.scales.step,
+				String(inv.plan.route[a.waypoint_index - 1]) == String(a.node))
+			inv_checked += 1
+			if String(a.node) == String(inv.plan.exit_node):
+				inv_stood_in_exit = true
+		inv.advance()
+	t.is_true("цель взята на инвариантном прогоне", inv.objective_done)
+	t.is_true("корпус проверок инварианта непуст (пар «агент × шаг»: %d)" % inv_checked,
+		inv_checked > 0)
+	t.is_true("отставший стоял в выходе ПЕРЕД взятием цели — форма, ради которой написано правило 0",
+		inv_stood_in_exit)
+	t.eq("инвариант цел: путь отставшего — сам выход, и то же отдаёт правило 2 (выход на его же индексе)",
+		inv.own[1].waypoints, ["start"])
+
+	# 11. ЕДИНСТВЕННЫЙ СЛУЧАЙ, ГДЕ ПОЛОВИНА `here == exit_node` НЕСЁТ, — СЛОМАННЫЙ ИНВАРИАНТ:
+	# индекс разошёлся с узлом, правило 2 молчит (`plan.route[current] != here`), и без
+	# правила 0 уже пришедший на выход пошёл бы назад по пройденному пути. Состояние собрано
+	# РУКАМИ — модель такого не производит (блок 10), и это не побочность пробы, а её смысл:
+	# ассерт держит ровно ту работу, которую несёт половина, и краснеет при её снятии.
+	var stuck = _make_corridor("start", 5)
+	var lag = stuck.own[1]
+	lag.node = "start"          # стоит В ВЫХОДЕ
+	lag.waypoint_index = 3      # а индекс указывает на узел маршрута, которого тут нет
+	lag.path = ["start", "a", "start"]   # и путь уже успел сходить в `a` и вернуться
+	t.is_true("состояние пробное: индекс разошёлся с узлом",
+		String(stuck.plan.route[lag.waypoint_index - 1]) != String(lag.node))
+	t.is_true("правило 1 молчит: у выхода нет ребра к самому себе",
+		stuck.mission.edge_between("start", "start").is_empty())
+	t.is_true("правило 2 молчит: выход не впереди по плану",
+		stuck._exit_ahead("start", "start", lag.waypoint_index - 1).is_empty())
+	for i in 6:
+		stuck.advance()
+		if stuck.objective_done:
+			break
+	t.is_true("цель взята ведущим", stuck.objective_done)
+	t.eq("сломанный инвариант: агент в выходе не уходит дальше — путь кончается выходом",
+		lag.waypoints, ["start"])
+	stuck.advance()
+	t.eq("сломанный инвариант: агент остался в выходе", lag.node, "start")
+	for i in 6:
+		stuck.advance()
+	t.eq("группа всё равно собралась на выходе", String(stuck.result()["outcome"]), "extracted")
+
+	# 12. ВТОРАЯ ПОЛОВИНА ПРАВИЛА 0 — НЕСУЩАЯ: план без выхода (`exit_node == ""`). Без неё
+	# `_exit_ahead` ищет пустую строку в маршруте и не находит, `walked` непуст и кончается
+	# текущим узлом — и обратный путь уводит агента от цели к узлу входа. Состояние
+	# достижимо штатно (план без выхода никто не запрещает), инвариант при этом цел.
+	var exitless = _make(["dock", "hall", "archive0"], "")
+	exitless.guards = []
+	for i in 6:
+		exitless.advance()
+	t.is_true("цель взята на плане без выхода", exitless.objective_done)
+	t.eq("план без выхода: путь отхода — сам текущий узел, а не обратный путь",
+		exitless.own[0].waypoints, [String(exitless.own[0].node)])
+	for i in 4:
+		exitless.advance()
+	t.eq("план без выхода: агент не пошёл назад к узлу входа", exitless.own[0].node, "archive0")
+
 	return t.results
 
 

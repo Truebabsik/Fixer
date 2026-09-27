@@ -63,7 +63,7 @@
   "window.w_locked_door.silence.good": "Эхо вскрывает дверь офиса с ходу.",
   "window.w_locked_door.silence.neutral": "Эхо возится с замком. Дверь офиса открывается позже.",
   "window.w_locked_door.silence.bad": "Эхо срывает замок. Дверь офиса открыта, на этаже слышали.",
-  "window.w_locked_door.silence.safe": "Кира вскрывает дверь сама. Обход через кухню не складывается.",
+  "window.w_locked_door.silence.safe": "Кира уводит группу в обход через кухню. Дольше, но без шума.",
 
   "window.w_bio_door.text": "Серверная. Биометрия. Внутри — дежурный инженер.",
   "window.w_bio_door.breach": "Проломить биометрию.",
@@ -141,7 +141,7 @@
   "window.w_witness.silence.good": "Эхо уводит группу мимо проёма. Свидетель не оборачивается.",
   "window.w_witness.silence.neutral": "Эхо ждёт в коридоре. Свидетель не уходит.",
   "window.w_witness.silence.bad": "Эхо задевает дверь кухни. Свидетель оборачивается.",
-  "window.w_witness.silence.safe": "Кира ведёт группу мимо кухни. Увести в офис не выходит.",
+  "window.w_witness.silence.safe": "Кира ведёт группу в офис, минуя кухню. Дольше, но предсказуемо.",
 
   "window.w_stuck_lift.text": "Тревога. Грузовой лифт встал между этажами. Группа внутри.",
   "window.w_stuck_lift.hack_out": "Аварийный взлом изнутри.",

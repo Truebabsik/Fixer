@@ -1,0 +1,283 @@
+{
+  "id": "mission-example",
+  "title_key": "mission.example.title",
+  "facility_key": "facility.meridian",
+  "note": "Образец формы из комплекта самопроверки. Числа и названия условны: важно только то, что файл проходит валидатор и из него собирается миссия.",
+
+  "nodes": {
+    "main_entry1": { "floor": 1, "tags": ["entry"], "pos": { "x": 0, "y": 8 }, "name_key": "room.main_entry1" },
+    "lobby1":      { "floor": 1, "tags": [], "pos": { "x": 0, "y": 4 }, "name_key": "room.lobby1" },
+    "garage1":     { "floor": 1, "tags": ["entry"], "pos": { "x": 4, "y": 0 }, "name_key": "room.garage1" },
+    "stair1":      { "floor": 1, "tags": ["stair"], "pos": { "x": 0, "y": 0 }, "name_key": "room.stair1" },
+    "lift_main1":  { "floor": 1, "tags": ["lift_main"], "pos": { "x": 4, "y": 8 }, "name_key": "room.lift_main1" },
+    "lift_freight1": { "floor": 1, "tags": ["lift_freight"], "pos": { "x": 8, "y": 0 }, "name_key": "room.lift_freight1" },
+
+    "stair2":  { "floor": 2, "tags": ["stair"], "pos": { "x": 0, "y": 0 }, "name_key": "room.stair2" },
+    "ops2":    { "floor": 2, "tags": [], "pos": { "x": 0, "y": 4 }, "name_key": "room.ops2" },
+    "term2":   { "floor": 2, "tags": ["terminal"], "pos": { "x": 4, "y": 4 }, "name_key": "room.term2" },
+    "lift_main2": { "floor": 2, "tags": ["lift_main"], "pos": { "x": 4, "y": 8 }, "name_key": "room.lift_main2" },
+    "server2": { "floor": 2, "tags": ["server", "vault"], "pos": { "x": 4, "y": 0 }, "name_key": "room.server2" },
+
+    "stair0":   { "floor": -1, "tags": ["stair"], "pos": { "x": 0, "y": 0 }, "name_key": "room.stair0" },
+    "hall0":    { "floor": -1, "tags": [], "pos": { "x": 0, "y": 4 }, "name_key": "room.hall0" },
+    "archive0": { "floor": -1, "tags": ["cold_archive"], "pos": { "x": 4, "y": 4 }, "name_key": "room.archive0" }
+  },
+
+  "floors": {
+    "-1": { "name_key": "floor.-1" },
+    "1":  { "name_key": "floor.1" },
+    "2":  { "name_key": "floor.2" }
+  },
+
+  "edges": [
+    { "id": "e_main_lobby", "a": "main_entry1", "b": "lobby1", "kind": "door", "steps": 1, "noise": 0 },
+    { "id": "e_lobby_stair1", "a": "lobby1", "b": "stair1", "kind": "corridor", "steps": 1, "noise": 0 },
+    { "id": "e_lobby_liftmain", "a": "lobby1", "b": "lift_main1", "kind": "corridor", "steps": 1, "noise": 0 },
+    { "id": "e_garage_lobby", "a": "garage1", "b": "lobby1", "kind": "door", "steps": 2, "noise": 0 },
+    { "id": "e_garage_freight", "a": "garage1", "b": "lift_freight1", "kind": "lift_freight", "steps": 2, "noise": 3, "note": "внутренний грузовой подъёмник дока; тревога его перекрывает — окно w_freight_hold" },
+
+    { "id": "e_stair_1_2", "a": "stair1", "b": "stair2", "kind": "stairs", "steps": 3, "noise": 0 },
+    { "id": "e_stair_2_0", "a": "stair2", "b": "stair0", "kind": "stairs", "steps": 3, "noise": 0 },
+    { "id": "e_stair2_ops2", "a": "stair2", "b": "ops2", "kind": "corridor", "steps": 1, "noise": 0 },
+    { "id": "e_ops2_term2", "a": "ops2", "b": "term2", "kind": "door", "steps": 1, "noise": 0 },
+    { "id": "e_term2_liftmain2", "a": "term2", "b": "lift_main2", "kind": "corridor", "steps": 1, "noise": 0 },
+    { "id": "e_liftmain2_server2", "a": "lift_main2", "b": "server2", "kind": "door", "steps": 1, "noise": 0, "locked": true, "note": "серверная: единственная дверь, окно w_server_door" },
+
+    { "id": "e_stair0_hall0", "a": "stair0", "b": "hall0", "kind": "corridor", "steps": 1, "noise": 0 },
+    { "id": "e_hall0_archive0", "a": "hall0", "b": "archive0", "kind": "door", "steps": 1, "noise": 0, "locked": true, "note": "дверь холодного зала, окно w_archivist" },
+
+    { "id": "e_liftmain_1_2", "a": "lift_main1", "b": "lift_main2", "kind": "lift_main", "steps": 2, "noise": 4 },
+    { "id": "e_freight_1_0", "a": "lift_freight1", "b": "hall0", "kind": "lift_freight", "steps": 3, "noise": 4 }
+  ],
+
+  "patrols": [
+    { "id": "guard_1", "route": ["lobby1", "garage1"], "period": 4 },
+    { "id": "guard_2", "route": ["ops2", "term2"], "period": 5 },
+    { "id": "guard_3", "route": ["stair0", "hall0", "lift_freight1", "garage1", "lobby1", "stair1", "stair2"], "period": 6,
+      "note": "кольцо из семи точек: последняя (stair2) соединена ребром с первой (stair0), маршрут замкнут — 01-format.md §4.1" }
+  ],
+
+  "sensors": [
+    { "id": "s_lobby", "nodes": ["lobby1", "main_entry1"] },
+    { "id": "s_ops2", "nodes": ["ops2", "term2"] },
+    { "id": "s_hall0", "nodes": ["hall0", "stair0"] }
+  ],
+
+  "objective": "archive0",
+
+  "windows": [
+    {
+      "id": "w_archivist",
+      "kind": "locked_edge",
+      "trigger": { "type": "locked_edge", "edge": "e_hall0_archive0" },
+      "text_key": "window.w_archivist.text",
+      "options": [
+        { "id": "bypass", "text_key": "window.w_archivist.bypass", "complexity": 2,
+          "cost": { "noise": 0, "delay": 4 },
+          "effects": [{ "type": "unlock", "edge": "e_hall0_archive0" }],
+          "note": "только время: самый тихий путь" },
+        { "id": "force", "text_key": "window.w_archivist.force", "complexity": 1,
+          "cost": { "noise": 8, "delay": 1 },
+          "effects": [{ "type": "unlock", "edge": "e_hall0_archive0" }],
+          "note": "грубая сила: быстро и громко" }
+      ],
+      "silence": {
+        "text_key": "window.w_archivist.silence",
+        "good_key": "window.w_archivist.silence.good",
+        "neutral_key": "window.w_archivist.silence.neutral",
+        "bad_key": "window.w_archivist.silence.bad",
+        "safe_key": "window.w_archivist.silence.safe",
+        "good": [{ "type": "unlock", "edge": "e_hall0_archive0" }],
+        "neutral": [{ "type": "delay", "value": 2 }, { "type": "unlock", "edge": "e_hall0_archive0" }],
+        "bad": [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 },
+                { "type": "unlock", "edge": "e_hall0_archive0" }],
+        "safe": [{ "type": "delay", "value": 3 }, { "type": "unlock", "edge": "e_hall0_archive0" }],
+        "note": "дверь открыта при любом качестве: разной бывает только цена"
+      }
+    },
+    {
+      "id": "w_server_door",
+      "kind": "locked_edge",
+      "trigger": { "type": "locked_edge", "edge": "e_liftmain2_server2" },
+      "text_key": "window.w_server_door.text",
+      "options": [
+        { "id": "hack", "text_key": "window.w_server_door.hack", "complexity": 3,
+          "cost": { "noise": 1, "delay": 4 },
+          "effects": [{ "type": "unlock", "edge": "e_liftmain2_server2" }],
+          "note": "знание вместо силы" },
+        { "id": "crack", "text_key": "window.w_server_door.crack", "complexity": 1,
+          "cost": { "noise": 12, "delay": 0 },
+          "effects": [{ "type": "unlock", "edge": "e_liftmain2_server2" }],
+          "note": "почти гарантированная тревога" }
+      ],
+      "silence": {
+        "text_key": "window.w_server_door.silence",
+        "good_key": "window.w_server_door.silence.good",
+        "neutral_key": "window.w_server_door.silence.neutral",
+        "bad_key": "window.w_server_door.silence.bad",
+        "safe_key": "window.w_server_door.silence.safe",
+        "good": [{ "type": "unlock", "edge": "e_liftmain2_server2" }],
+        "neutral": [{ "type": "delay", "value": 2 }, { "type": "unlock", "edge": "e_liftmain2_server2" }],
+        "bad": [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 },
+                { "type": "unlock", "edge": "e_liftmain2_server2" }],
+        "safe": [{ "type": "delay", "value": 3 }, { "type": "unlock", "edge": "e_liftmain2_server2" }],
+        "note": "замок снимается при любом качестве: молчание не проваливает окно"
+      }
+    },
+    {
+      "id": "w_freight_hold",
+      "kind": "locked_edge",
+      "trigger": { "type": "locked_edge", "edge": "e_garage_freight" },
+      "text_key": "window.w_freight_hold.text",
+      "options": [
+        { "id": "wait_out", "text_key": "window.w_freight_hold.wait_out", "complexity": 1,
+          "cost": { "noise": 0, "delay": 5 },
+          "effects": [{ "type": "noop" }],
+          "note": "переждать: время, и ничего больше" },
+        { "id": "service_hatch", "text_key": "window.w_freight_hold.service_hatch", "complexity": 2,
+          "cost": { "noise": 3, "delay": 2 },
+          "effects": [{ "type": "noise", "value": 3 },
+                      { "type": "engine_proposal", "id": "service_hatch",
+                        "want": "Группа выходит из кабины через служебный люк и обходит перекрытый подъёмник",
+                        "needs": "второй выход из кабины и правило возврата на исходный маршрут",
+                        "fallback": { "type": "delay", "value": 3 } }],
+          "note": "обход остаётся заявкой движку: сегодня это только время" }
+      ],
+      "silence": {
+        "text_key": "window.w_freight_hold.silence",
+        "good_key": "window.w_freight_hold.silence.good",
+        "neutral_key": "window.w_freight_hold.silence.neutral",
+        "bad_key": "window.w_freight_hold.silence.bad",
+        "safe_key": "window.w_freight_hold.silence.safe",
+        "good": [{ "type": "unlock", "edge": "e_garage_freight" }],
+        "neutral": [{ "type": "delay", "value": 2 }, { "type": "unlock", "edge": "e_garage_freight" }],
+        "bad": [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 },
+                { "type": "unlock", "edge": "e_garage_freight" }],
+        "safe": [{ "type": "delay", "value": 3 }, { "type": "unlock", "edge": "e_garage_freight" }],
+        "note": "ребро не заперто замком: его перекрывает тревога, поэтому окно законно (см. 01-format.md §3.2)"
+      }
+    },
+    {
+      "id": "w_lead_found",
+      "kind": "node_entered",
+      "trigger": { "type": "node_entered", "node": "ops2" },
+      "text_key": "window.w_lead_found.text",
+      "options": [
+        { "id": "copy_logs", "text_key": "window.w_lead_found.copy_logs", "complexity": 2,
+          "cost": { "noise": 0, "delay": 2 },
+          "effects": [{ "type": "engine_proposal", "id": "lead_known",
+                        "want": "Зацепка из журнала обходов сохраняется в «Итогах» и ведёт группу в подвал осознанно",
+                        "needs": "флаг зацепки в журнале",
+                        "fallback": { "type": "noop" } }] },
+        { "id": "walk_past", "text_key": "window.w_lead_found.walk_past", "complexity": 1,
+          "cost": { "noise": 0, "delay": 0 },
+          "effects": [{ "type": "noop" }] }
+      ],
+      "silence": {
+        "text_key": "window.w_lead_found.silence",
+        "good_key": "window.w_lead_found.silence.good",
+        "neutral_key": "window.w_lead_found.silence.neutral",
+        "bad_key": "window.w_lead_found.silence.bad",
+        "safe_key": "window.w_lead_found.silence.safe",
+        "good": [{ "type": "noop" }],
+        "neutral": [{ "type": "delay", "value": 2 }],
+        "bad": [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 }],
+        "safe": [{ "type": "delay", "value": 3 }],
+        "note": "открывать нечего: триггер не на ребре, поэтому unlock здесь запрещён"
+      }
+    },
+    {
+      "id": "w_guard_shift",
+      "kind": "guard_in_sensor",
+      "trigger": { "type": "guard_in_sensor", "sensor": "s_hall0" },
+      "text_key": "window.w_guard_shift.text",
+      "options": [
+        { "id": "wait_out", "text_key": "window.w_guard_shift.wait_out", "complexity": 1,
+          "cost": { "noise": 0, "delay": 3 },
+          "effects": [{ "type": "noop" }],
+          "note": "переждать: только время" },
+        { "id": "slip_past", "text_key": "window.w_guard_shift.slip_past", "complexity": 2,
+          "cost": { "noise": 2, "delay": 0 },
+          "effects": [{ "type": "noise", "value": 2 },
+                      { "type": "engine_proposal", "id": "slip_past",
+                        "want": "Группа проходит мимо охранника в стороне от камеры, не поднимая шума",
+                        "needs": "направление взгляда охранника и признак «не заметил»",
+                        "fallback": { "type": "noise", "value": 2 } }],
+          "note": "обход на виду остаётся заявкой движку: сегодня это только шум" }
+      ],
+      "silence": {
+        "text_key": "window.w_guard_shift.silence",
+        "good_key": "window.w_guard_shift.silence.good",
+        "neutral_key": "window.w_guard_shift.silence.neutral",
+        "bad_key": "window.w_guard_shift.silence.bad",
+        "safe_key": "window.w_guard_shift.silence.safe",
+        "good": [{ "type": "noop" }],
+        "neutral": [{ "type": "delay", "value": 2 }],
+        "bad": [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 }],
+        "safe": [{ "type": "delay", "value": 3 }],
+        "note": "открывать нечего: триггер не на ребре, поэтому unlock здесь запрещён"
+      }
+    }
+  ],
+
+  "intel": [
+    {
+      "channel": "agents",
+      "observed_at": 0,
+      "entries": [
+        { "kind": "patrol", "id": "guard_1", "route": ["lobby1", "garage1"], "period": 4,
+          "age_hours": 6, "false": false, "note_key": "intel.agents.guard1" },
+        { "kind": "patrol", "id": "guard_3", "route": ["stair0", "ops2"], "period": 8,
+          "age_hours": 6, "false": true, "note_key": "intel.agents.patrol_false",
+          "note": "ЕДИНСТВЕННЫЙ подброшенный пункт: подвал описан неверно" },
+        { "kind": "door_state", "node": "server2", "age_hours": 6, "false": false,
+          "note_key": "intel.agents.server_closed" }
+      ]
+    },
+    {
+      "channel": "hack",
+      "observed_at": 0,
+      "entries": [
+        { "kind": "sensor", "nodes": ["hall0"], "age_hours": 8, "false": false,
+          "note_key": "intel.hack.camera_basement" },
+        { "kind": "guard_count", "node": "archive0", "count": 1, "age_hours": 8, "false": false,
+          "note_key": "intel.hack.archivist" }
+      ]
+    },
+    {
+      "channel": "drone",
+      "observed_at": 0,
+      "entries": [
+        { "kind": "guard_count", "node": "garage1", "count": 1, "age_hours": 24, "false": false,
+          "note_key": "intel.drone.garage" }
+      ]
+    }
+  ],
+
+  "access_points": [
+    {
+      "id": "ap_term2", "node": "term2", "kind": "terminal",
+      "text_key": "ap.ap_term2.text",
+      "trace_key": "ap.ap_term2.trace",
+      "actions": [
+        { "id": "take_money", "text_key": "ap.ap_term2.take_money", "complexity": 1,
+          "cost": { "steps": 2 },
+          "effects": [{ "type": "money", "value": 15 }, { "type": "trace", "value": 5 }] },
+        { "id": "tools", "text_key": "ap.ap_term2.tools", "complexity": 1,
+          "cost": { "steps": 2 },
+          "effects": [{ "type": "trace", "value": 4 }],
+          "note": "ключ и снятая камера — инструменты" }
+      ]
+    },
+    {
+      "id": "ap_panel2", "node": "lift_main2", "kind": "door_panel",
+      "text_key": "ap.ap_panel2.text",
+      "actions": [
+        { "id": "short_out", "text_key": "ap.ap_panel2.short_out", "complexity": 2,
+          "cost": { "steps": 3 },
+          "effects": [{ "type": "noise", "value": 4 }, { "type": "trace", "value": 2 }],
+          "note": "панель лифта: обесточить на время" }
+      ]
+    }
+  ]
+}

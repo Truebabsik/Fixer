@@ -75,18 +75,41 @@ const WINDOW_KINDS := TRIGGER_TYPES
 const EFFECT_TYPES := ["unlock", "noise", "delay", "noop", "engine_proposal", "money", "trace"]
 const POINT_KINDS := ["terminal", "door_panel", "camera", "climate"]
 const INTEL_KINDS := ["patrol", "sensor", "guard_count", "door_state"]
+## Каналы разведки: единственный подброшенный пункт живёт у агентуры (см. ниже), и это имя
+## объявлено ОТДЕЛЬНО — чтобы «agents» не оказалось двумя литералами в одном файле: канал
+## переименуется в одном месте, и список с правилом лжи не разъедутся молча.
+const INTEL_LIE_CHANNEL := "agents"
+## Каналы разведки, известные форме (02-format.md §5; справочник — `docs/spr/channels.md` §2:
+## дрон, агентура, взлом). Список закрыт: канал адресует данные на экране и в текстах
+## (`intel.<канал>.<пометка>`), поэтому опечатка («agentss») уносит весь блок из своего
+## канала молча — данные приехали, а на экран не попали.
+##
+## Живёт здесь, рядом с `INTEL_KINDS`, потому что спросить его сегодня некому: разведку не
+## читает НИ ОДНА строка ядра (`sim/sim.gd` строит `ghost_positions` из позиций охраны, а не
+## из `intel`), и второго перечня каналов в коде нет. Место, где он должен жить дальше, —
+## модель миссии (`sim/mission.gd`, рядом с `EDGE_KINDS`) или презентация, когда разведка
+## понадобится им: тогда валидатор будет спрашивать список оттуда, как спрашивает
+## `Mission.EDGE_KINDS` и `Response.blockable_kind`, а не держать у себя. Перенос — правка
+## `sim/`, а она вне области этой задачи (названо в отчёте).
+const INTEL_CHANNELS := ["drone", INTEL_LIE_CHANNEL, "hack"]
 const SILENCE_QUALITIES := ["good", "neutral", "bad", "safe"]
 
 ## Свои агенты заняты движком: под этими id в patrols нельзя.
 const RESERVED_AGENT_IDS := ["kira", "echo"]
 
 ## ОБЯЗАТЕЛЬНЫЕ текстовые ключи: тексты СИСТЕМЫ, а не окна (04-texts.md §4 плюс блоки
-## §3.1–3.2). У `mission.01.title`, `log.silence`, `outcome.caught` или `results.summary`
-## нет поля в данных миссии, на которое указывал бы `*_key`, поэтому обычная сверка
-## (`_walk_text_keys` → `_check_texts`) их не видит вовсе: поставка без них оставалась бы
-## «чистой», а игра — без названия уровня, без строки «КОМАНДУЕТ» и без итогов.
+## §3.1–3.2). У `log.silence`, `outcome.caught` или `results.summary` нет поля в данных
+## миссии, на которое указывал бы `*_key`, поэтому обычная сверка (`_walk_text_keys` →
+## `_check_texts`) их не видит вовсе: поставка без них оставалась бы «чистой», а игра — без
+## строки «КОМАНДУЕТ» и без итогов.
 ##
-## Перечень взят из постановки дословно и НЕ расширяется: `04-texts.md` §3.3–3.7 оставляет
+## Перечень НЕ привязан к номеру миссии. Прежний первый элемент, `mission.01.title`, был
+## ключом ОДНОЙ миссии и на миссии с другим `title_key` выписывал ЛОЖНЫЙ
+## `MISSING_REQUIRED_TEXT` (проверено пробой, review-03 §7.5). Держать его здесь нечем и
+## незачем: название миссии — обычное поле данных (`title_key`), а его отсутствие называет
+## сверка данных — `MISSING_TEXT` на своём поле и ровно один диагноз, при ЛЮБОМ номере
+## миссии (см. `_check_required_texts`). Поэтому из перечня постановки убран ровно этот
+## ключ, а остальные взяты дословно и НЕ расширяются: `04-texts.md` §3.3–3.7 оставляет
 ## окна, голоса и финальные раскрытия автору уровня, и требовать их здесь значило бы
 ## зашить одну миссию в конвейер. `team.market.intro` стоит рядом с блоком §4 потому, что
 ## он того же класса: биржа команды (§3.2) — экран системы, а не окно миссии.
@@ -95,7 +118,6 @@ const RESERVED_AGENT_IDS := ["kira", "echo"]
 ## (контракт `validate`), пустой словарь — «текстов нет», и тогда отсутствуют все
 ## обязательные ключи тоже.
 const REQUIRED_TEXT_KEYS := [
-	"mission.01.title",
 	"negotiation.intro", "negotiation.term.money", "negotiation.term.time",
 	"negotiation.term.truth", "negotiation.mediator.recognize",
 	"negotiation.mediator.answer.press", "negotiation.mediator.answer.yield",
@@ -121,9 +143,10 @@ const REQUIRED_TEXT_KEYS := [
 ##
 ## Прежний долг, записанный здесь («обязательные группы `log.*`, `voice.*`, `final.*`,
 ## `outcome.*`, `results.*` не проверяются: текстов ноль, и такая проверка давала бы только
-## ложные срабатывания»), ЗАКРЫТ: тексты поставки есть (все 32 обязательных ключа на
-## месте, число ключей поставки держит кейс доставки), и пропажа обязательного ключа —
-## реальный дефект контента, который обязан называться. Проверка живёт в
+## ложные срабатывания»), ЗАКРЫТ: тексты поставки есть (все 32 ключа перечня постановки на
+## месте — 31 держит `REQUIRED_TEXT_KEYS`, название миссии — сверка `title_key`; число
+## ключей поставки держит кейс доставки), и пропажа обязательного ключа — реальный дефект
+## контента, который обязан называться. Проверка живёт в
 ## `_check_required_texts`, код проблемы — `MISSING_REQUIRED_TEXT`.
 const UNUSED_OK_PREFIXES := ["mission.", "negotiation.", "team.", "log.", "voice.",
 	"final.", "outcome.", "results.", "intel."]
@@ -461,13 +484,33 @@ static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array)
 				for n in route:
 					if not nodes.is_empty() and not nodes.has(String(n)):
 						problems.append(Problems.bad_ref("%s.route" % path, "нет помещения «%s»" % String(n)))
-				## Движок не ищет путь: охранник идёт по списку, и на разрыве застрянет
-				## (02-format.md §2.3). Соседние точки обязаны быть соединены ребром.
-				for k in max(0, (route as Array).size() - 1):
+				## Движок путь не ищет: охранник идёт по СПИСКУ, узлы берутся по индексу
+				## (`sim/sim.gd:_advance_guards`), и разрыв означает, что патруль
+				## оказывается в помещении, которого не проходит. Соседние точки обязаны
+				## быть соединены ребром (02-format.md §2.3).
+				var size := (route as Array).size()
+				for k in max(0, size - 1):
 					if not _connected(String(route[k]), String(route[k + 1]), data):
 						problems.append(Problems.bad_value("%s.route" % path,
 							"разрыв маршрута: «%s» и «%s» не соединены ребром"
 							% [String(route[k]), String(route[k + 1])]))
+				## ЗАМЫКАНИЕ маршрута: индекс растёт по модулю длины списка
+				## (`sim/sim.gd:_advance_guards` — `(patrol_index + 1) % size`), поэтому
+				## после последней точки идёт первая, и замыкающая пара — такое же ребро
+				## маршрута, как соседние. Прежде она не проверялась вовсе, и маршрут из
+				## трёх помещений без ребра «последнее → первое» считался валидным
+				## (находка 1 отчёта 11, §5.3): уровень проходил форму с разрывом в цикле.
+				##
+				## Две пары сюда не попадают, и обе — не разрыв:
+				##  * маршрут из ДВУХ точек: соседняя пара и замыкающая — одна и та же,
+				##    о ней уже сказано выше; второй диагноз на один дефект запрещён;
+				##  * маршрут, возвращающийся в первую точку (`a, b, a`): «переход» из
+				##    точки в неё же ребром не является (петли запрещены), а ядро такой
+				##    шаг проходит как стояние на месте — замыкать нечего.
+				if size >= 3 and String(route[0]) != String(route[size - 1]) \
+						and not _connected(String(route[size - 1]), String(route[0]), data):
+					problems.append(Problems.patrol_route_open("%s.route" % path,
+						String(route[size - 1]), String(route[0])))
 		if p.has("period"):
 			var period: Variant = _int_or(p["period"], "%s.period" % path, problems)
 			if period != null and int(period) < 1:
@@ -657,7 +700,7 @@ static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sens
 		if WINDOW_KINDS.has(kind) and trigger_type != "" and kind != trigger_type:
 			problems.append(Problems.bad_value("%s.kind" % path,
 				"вид окна «%s» не совпадает с триггером «%s»: рантайм-вид ядро строит из trigger.type, kind на него не влияет" % [kind, trigger_type]))
-		_check_options(w, wid, known_edges, problems)
+		_check_options(w, wid, trigger_type, known_edges, problems)
 		_check_silence(w, wid, trigger_type, String(trigger["edge"]), known_edges, problems)
 
 
@@ -708,7 +751,8 @@ static func _check_ref_key(obj: Dictionary, key: String, what: String, path: Str
 		problems.append(Problems.bad_ref("%s.%s" % [path, key], "нет %s «%s»" % [what, value]))
 
 
-static func _check_options(w: Dictionary, wid: String, known_edges: Dictionary, problems: Array) -> void:
+static func _check_options(w: Dictionary, wid: String, trigger_type: String,
+		known_edges: Dictionary, problems: Array) -> void:
 	if not w.has("options"):
 		problems.append(Problems.missing_field("windows.%s.options" % wid, TYPE_ARRAY))
 		return
@@ -772,6 +816,7 @@ static func _check_options(w: Dictionary, wid: String, known_edges: Dictionary, 
 							"цена не может быть отрицательной"))
 		if o.has("effects"):
 			_check_effects(o["effects"], "%s.effects" % path, known_edges, problems)
+			_check_unlock_needs_door(o["effects"], "%s.effects" % path, trigger_type, problems)
 		## Дубль варианта — два приказа с одинаковой ценой и одинаковыми последствиями:
 		## выбор между ними ничего не меняет. Порядок эффектов значим (импульс, шум,
 		## задержка — разный ход), поэтому сравнивается последовательность целиком.
@@ -803,6 +848,52 @@ static func _option_signature(o: Dictionary, cost_ok: bool) -> String:
 			if e.has(field):
 				parts.append("%s=%s" % [field, str(e[field])])
 	return "|".join(parts)
+
+
+## Окно, которое ждёт не запертой двери, открывать нечего: `unlock` снимает блокировку с
+## РЕБРА, а `node_entered` и `guard_in_sensor` срабатывают не на ребре. Ядро такой эффект
+## применит (`sim/sim.gd:_apply_effect` → `_unlock`), и автор будет считать, что поставил
+## сцену с открытием двери, а открывать нечего.
+##
+## Правило ОДНО на все места окна, где бывают эффекты: варианты (`options[].effects`) и
+## четыре исхода молчания. Прежняя проверка жила только в молчании, и `unlock` в варианте
+## окна «группа вошла в помещение» проходил молча (находка 2 отчёта 11, §5.3).
+##
+## `path` — путь ПОЛЯ с эффектами, а не элемента списка: диагноз адресует место, где эффект
+## объявлен, и совпадает с прежним диагнозом молчания. Форму списка и его элементов уже
+## назвал `_check_effects` (`WRONG_TYPE` на не-массив и на не-словарь внутри): разбирать
+## нечего, и второго следствия одному дефекту не выписываем (шапка файла). Испорченный
+## триггер (`trigger_type == ""`) сюда тоже не доходит: о нём сказано на `trigger.type`.
+##
+## Заглядывает и в `fallback` заявки движку: это ТО ЖЕ место окна на уровень глубже, и
+## `unlock` там открывает ровно то же, чего у окна нет. Читается `fallback` обеими
+## формами (§7) через `_as_effect_list` — тем же приведением, что у `_check_fallback`.
+## Мусор и пустой `fallback` не разбираются: их форма уже названа, и второго следствия
+## одному дефекту не выписываем.
+##
+## В `_check_effects` это правило НЕ переезжает намеренно: у действия точки доступа
+## (`access_points[].actions[].effects`) эффект `unlock` законен — терминал открывает
+## дверь, и «окна не про дверь» там не бывает. Общий разбор всех списков эффектов
+## покраснил бы честный контент.
+static func _check_unlock_needs_door(raw, path: String, trigger_type: String, problems: Array) -> void:
+	if trigger_type == "" or trigger_type == "locked_edge":
+		return
+	if typeof(raw) != TYPE_ARRAY:
+		return
+	var effects: Array = raw
+	for i in effects.size():
+		var effect = effects[i]
+		if typeof(effect) != TYPE_DICTIONARY:
+			continue
+		## `str`, а не `String`: значение приходит из данных и может быть словарём —
+		## конструктор `String` на таком значении падает рантаймом.
+		var type := str(effect.get("type", ""))
+		if type == "unlock":
+			problems.append(Problems.bad_value(path,
+				"unlock у окна с триггером «%s»: открывать нечего" % trigger_type))
+		elif type == "engine_proposal":
+			_check_unlock_needs_door(_as_effect_list(effect.get("fallback", null)),
+				"%s[%d].fallback" % [path, i], trigger_type, problems)
 
 
 ## Разрешённые поля `silence` (02-format.md §4.5 плюс ключи качеств): базовый ключ
@@ -854,6 +945,9 @@ static func _check_silence(w: Dictionary, wid: String, trigger_type: String, tri
 			continue
 		var q_path := "%s.%s" % [path, quality]
 		_check_effects(silence[quality], q_path, known_edges, problems)
+		## Правило «открывать нечего» — то же, что у вариантов: ОДИН хелпер на оба места
+		## окна, где бывают эффекты, и один код проблемы (`_check_unlock_needs_door`).
+		_check_unlock_needs_door(silence[quality], q_path, trigger_type, problems)
 		## Разбор эффектов идёт только у массива: одиночный объект — уже названная болезнь
 		## формы (`_check_effects` → `WRONG_TYPE`, 02-format.md §4.5). Единый разбор обоих
 		## форматов есть только у `fallback` (§7) — там его и делает `_check_fallback`.
@@ -866,14 +960,6 @@ static func _check_silence(w: Dictionary, wid: String, trigger_type: String, tri
 			if typeof(effect) != TYPE_DICTIONARY:
 				form_ok = false
 				continue
-			## Открывать ребро имеет смысл только у окна, привязанного к двери: окно
-			## «группа вошла в помещение» открывает то, чего в нём нет. `str`, а не
-			## `String`: значение приходит из данных и может быть словарём — конструктор
-			## `String` на таком значении падает рантаймом.
-			if str(effect.get("type", "")) == "unlock" \
-					and trigger_type != "" and trigger_type != "locked_edge":
-				problems.append(Problems.bad_value(q_path,
-					"unlock у окна с триггером «%s»: открывать нечего" % trigger_type))
 			## Зачёт выполнимости: `unlock` на нужное ребро — сам или внутри fallback.
 			if trigger_edge != "" and _opens_edge(effect, trigger_edge):
 				unlocks_edge = true
@@ -1041,6 +1127,15 @@ static func _check_intel(data: Dictionary, known_patrols: Dictionary, problems: 
 			problems.append(Problems.missing_field("%s.channel" % path, TYPE_STRING))
 			continue
 		var channel := _string_or(block["channel"], "%s.channel" % path, problems)
+		## Значение канала обязано быть из перечня: опечатка («agentss») проходила молча, и
+		## блок разведки не попадал ни в один канал на экране (находка 3 отчёта 11, §5.3).
+		##
+		## Правило лжи ниже судится только по ИЗВЕСТНОМУ каналу: у «магии» корень уже назван,
+		## и второе следствие на ту же ошибку (`INTEL_LIE_COUNT` про агентуру, которой в файле
+		## нет) было бы вторым диагнозом одному дефекту (шапка файла).
+		if channel != "" and not INTEL_CHANNELS.has(channel):
+			problems.append(Problems.bad_value("%s.channel" % path,
+				"неизвестный канал «%s», допустимы: %s" % [channel, ", ".join(INTEL_CHANNELS)]))
 		if block.has("observed_at"):
 			var observed: Variant = _int_or(block["observed_at"], "%s.observed_at" % path, problems)
 			if observed != null and int(observed) < 0:
@@ -1117,7 +1212,7 @@ static func _check_intel(data: Dictionary, known_patrols: Dictionary, problems: 
 					lies += 1
 		## Ложь агентуры — часть уровня, а не бросок: ровно один подброшенный пункт (D30).
 		## Считается только там, где все пометки `false` — честные bool.
-		if channel == "agents" and lies_known and lies != 1:
+		if channel == INTEL_LIE_CHANNEL and lies_known and lies != 1:
 			problems.append(Problems.intel_lie_count(channel, lies))
 
 
@@ -1253,10 +1348,12 @@ static func _check_texts(data: Dictionary, texts, problems: Array) -> void:
 ## сверки текстов, рядом с «ключ данных есть в текстах» и «чужих ключей нет».
 ##
 ## Ключ, на который ССЫЛАЮТСЯ данные, здесь второй раз НЕ называется: общая сверка уже
-## выписала ему `MISSING_TEXT` на его поле (`title_key` → `mission.01.title`), а «одна
-## ошибка — одно следствие» — правило шапки файла. Поэтому `mission.01.title`, лежащий И в
-## данных, И в обязательном списке, получает РОВНО ОДИН диагноз, и путь у него осмысленный
-## — тот, где ключ и живёт.
+## выписала ему `MISSING_TEXT` на его поле (`title_key` → ключ названия миссии), а «одна
+## ошибка — одно следствие» — правило шапки файла. Так держится и название миссии: в
+## обязательном перечне его нет (номер миссии в конвейерной константе давал ложный диагноз
+## следующей миссии, review-03 §7.5), а диагноз приходит от сверки данных и ровно один — на
+## `title_key`, где ключ и живёт. Половина правила «данные называют ключ, а его в текстах
+## нет» от этого не слабеет: она идёт по КАЖДОМУ ключу данных, включая название миссии.
 ##
 ## У системного ключа без поля в данных пути нет вовсе: `MISSING_TEXT` с чужим путём
 ## (`windows[3].text_key` у `log.silence`) был бы ложью. Такой ключ называет

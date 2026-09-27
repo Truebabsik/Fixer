@@ -14,9 +14,12 @@ const Validator := preload("res://content/validator.gd")
 ## Список намеренно НЕ берётся из `Validator.REQUIRED_TEXT_KEYS`: эталон, производный от
 ## проверяемого, не поймал бы ни одного ключа, выпавшего из списка валидатора
 ## (`docs/agents/review-checklist.md` §2 — «ассерт, который не может покраснеть»).
-## Две стороны держатся вместе кейсом 14: цикл снимает каждый ключ эталона по одному
-## (список валидатора не короче эталона), положительный ассерт на полном наборе — что он
-## не длиннее.
+## Держатся они вместе кейсом 14, но НЕ поэлементно: 31 ключ эталона ловит обязательный
+## перечень, а `mission.01.title` — сверка данных (`title_key`), потому что номер миссии в
+## конвейерной константе давал ложный диагноз СЛЕДУЮЩЕЙ миссии (`review-03` §7.5). Цикл
+## 14г снимает каждый ключ эталона по одному и требует ровно ОДИН диагноз про него — этим
+## покрыты обе половины; положительный ассерт на полном наборе держит список валидатора от
+## лишних требований.
 const REQUIRED_TEXTS := [
 	"mission.01.title",
 	"negotiation.intro", "negotiation.term.money", "negotiation.term.time",
@@ -307,6 +310,22 @@ func run() -> Array:
 	bad_floor["nodes"]["hall"]["floor"] = 1.5
 	t.is_true("floor дробный — WRONG_TYPE", Problems.has(Validator.validate(bad_floor, null), Problems.WRONG_TYPE))
 
+	# 3а. РЕШЕНИЕ ПО ДРОБНЫМ ЧИСЛАМ: целое, записанное с точкой, ПРИНИМАЕТСЯ — и это
+	# осознанный отказ от строгости, а не недосмотр (см. отчёт 12, раздел D). Причина
+	# измерена, а не предположена: разбор JSON отдаёт ВСЕ числа дробными (кейс 3
+	# `test_three_paths.gd`), поэтому поставка, прочитанная с диска, состоит из `float`
+	# целиком, и строгая проверка объявила бы `WRONG_TYPE` на каждом числе честного
+	# уровня (`mission-01.json`) — ложное срабатывание дороже пропуска. Дробное значение
+	# при этом по-прежнему отвергается: `1.5` выше.
+	#
+	# Ассерт держит решение от молчаливого ужесточения: сними терпимость к `TYPE_FLOAT`
+	# в `_expect_int`/`_int_or` — и он покраснеет (проба P-D в отчёте).
+	var int_as_float := _good()
+	int_as_float["patrols"][0]["period"] = 4.0
+	int_as_float["access_points"][0]["actions"][0]["cost"]["steps"] = 4.0
+	t.is_true("целое с точкой (4.0) принимается: JSON не хранит целых иначе",
+		Validator.validate(int_as_float, null).is_empty())
+
 	# 4. Неизвестный ключ сообщается, а `note` разрешён в любом объекте.
 	var unknown := _good()
 	unknown["edges"][0]["speed"] = 3
@@ -384,6 +403,46 @@ func run() -> Array:
 	var broken_problems := Validator.validate(broken_route, null)
 	t.eq("разрыв маршрута — BAD_VALUE на patrols[0].route",
 		_codes_at(broken_problems, "patrols[0].route"), [Problems.BAD_VALUE])
+
+	# I6б. ЗАМЫКАНИЕ маршрута патруля. Ядро ведёт охранника ПО КРУГУ: индекс растёт по
+	# модулю длины списка (`sim/sim.gd:_advance_guards` — `(patrol_index + 1) % size`),
+	# поэтому после последней точки идёт первая, и замыкающая пара — такое же ребро
+	# маршрута, как соседние. Прежде замыкание не проверялось вовсе: маршрут из трёх
+	# помещений без ребра «последнее → первое» считался валидным, и уровень проходил
+	# форму с разрывом в цикле (находка 1 отчёта 11, §5.3). В `_good()` есть только рёбра
+	# `entry–hall` и `hall–vault`: пары `vault–entry` в графе нет.
+	var open_route := _good()
+	open_route["patrols"][0]["route"] = ["entry", "hall", "vault"]
+	var open_route_problems: Array = Validator.validate(open_route, null)
+	t.eq("разомкнутый маршрут патруля — PATROL_ROUTE_OPEN на patrols[0].route",
+		_codes_at(open_route_problems, "patrols[0].route"), [Problems.PATROL_ROUTE_OPEN])
+	## Диагноз ровно один: соседние пары соединены, и разрыв замыкания не порождает
+	## второго сообщения (в том числе тем же кодом, что у соседних пар) — иначе автор
+	## искал бы ещё один разрыв маршрута.
+	t.eq("разомкнутый маршрут патруля — одна проблема на маршрут",
+		_codes(open_route_problems), [Problems.PATROL_ROUTE_OPEN])
+	## Сообщение называет ОБЕ точки замыкающей пары — последнюю и первую: по ним автор
+	## и находит пару, которой не хватает ребра.
+	t.is_true("разомкнутый маршрут — названы последняя и первая точки",
+		_message_at(open_route_problems, "patrols[0].route").contains("vault")
+		and _message_at(open_route_problems, "patrols[0].route").contains("entry"))
+
+	# Вторая половина правила: тот же маршрут с добавленным замыкающим ребром проходит.
+	var closed_route := _good()
+	closed_route["edges"].append({"id": "e_vault_entry", "a": "vault", "b": "entry",
+		"kind": "corridor", "steps": 1, "noise": 0})
+	closed_route["patrols"][0]["route"] = ["entry", "hall", "vault"]
+	t.eq("замкнутый маршрут из трёх точек — на маршруте проблем нет",
+		_codes_at(Validator.validate(closed_route, null), "patrols[0].route"), [])
+
+	# Маршрут, возвращающийся в первую точку (`a, b, a`), разрыва НЕ содержит: «переход»
+	# из точки в неё же ребром не является (петли запрещены), а ядро проходит его как
+	# стояние на месте. Без этой половины наивная проверка замыкания требовала бы
+	# несуществующего ребра `entry–entry` и краснила честный уровень.
+	var there_and_back := _good()
+	there_and_back["patrols"][0]["route"] = ["entry", "hall", "entry"]
+	t.eq("маршрут «туда и обратно» — не разрыв замыкания",
+		_codes_at(Validator.validate(there_and_back, null), "patrols[0].route"), [])
 
 	# 7. Ссылочная целостность.
 	var bad_edge := _good()
@@ -559,6 +618,69 @@ func run() -> Array:
 	unlock_in_node_window["windows"][0]["silence"]["good"] = [{"type": "unlock", "edge": "e_hall_vault"}]
 	t.is_true("unlock в молчании окна не про дверь — BAD_VALUE",
 		Problems.has(Validator.validate(unlock_in_node_window, null), Problems.BAD_VALUE))
+
+	# I1б. ПРАВИЛО «unlock у окна не про дверь» РАБОТАЕТ ВО ВСЕХ МЕСТАХ ОКНА, где бывают
+	# эффекты, а не только в молчании: `unlock` снимает блокировку с РЕБРА, и у окна
+	# `node_entered` / `guard_in_sensor` открывать нечего — ядро эффект применит
+	# (`sim/sim.gd:_apply_effect` → `_unlock`), а сцены у двери не будет. Прежде проверка
+	# жила только в `_check_silence`, и `unlock` в ВАРИАНТЕ проходил молча (находка 2
+	# отчёта 11, §5.3). Перебираются ОБА не-дверных триггера: «группа вошла» и «охранник в зоне» —
+	# разные значения одного правила, и «прошло на первом» второго не доказывает.
+	for non_door in [{"type": "node_entered", "node": "vault"},
+			{"type": "guard_in_sensor", "sensor": "s_hall"}]:
+		var window_kind := String(non_door["type"])
+		var unlock_option := _good()
+		unlock_option["windows"][0]["kind"] = window_kind
+		unlock_option["windows"][0]["trigger"] = non_door
+		## Молчание приводится к «не открывает ничего»: предмет кейса — ВАРИАНТ, и лишние
+		## диагнозы молчания сделали бы список проблем нечитаемым.
+		for quality in ["good", "neutral", "bad", "safe"]:
+			unlock_option["windows"][0]["silence"][quality] = [{"type": "delay", "value": 3}]
+		var option_problems: Array = Validator.validate(unlock_option, null)
+		t.eq("unlock в варианте окна «%s» — BAD_VALUE на поле эффектов" % window_kind,
+			_codes_at(option_problems, "windows.w_door.options[0].effects"), [Problems.BAD_VALUE])
+		## Ровно одна проблема: у одного дефекта одно следствие — `UNWINNABLE_EDGE` окну не
+		## про дверь не выписывается вовсе, а форма эффекта верна.
+		t.eq("unlock в варианте окна «%s» — ровно одна проблема" % window_kind,
+			_codes(option_problems), [Problems.BAD_VALUE])
+
+	# …и в молчании тот же код на своём пути: прежняя половина правила не сломана, а оба
+	# места окна называет ОДИН хелпер (`_check_unlock_needs_door`).
+	var unlock_silence_path := _good()
+	unlock_silence_path["windows"][0]["kind"] = "node_entered"
+	unlock_silence_path["windows"][0]["trigger"] = {"type": "node_entered", "node": "vault"}
+	unlock_silence_path["windows"][0]["options"][0]["effects"] = [{"type": "delay", "value": 1}]
+	t.eq("unlock в молчании окна не про дверь — BAD_VALUE на исходе",
+		_codes_at(Validator.validate(unlock_silence_path, null), "windows.w_door.silence.good"),
+		[Problems.BAD_VALUE])
+
+	# …и на уровень глубже: `fallback` заявки движку открывает ребро тем же `unlock`, и у
+	# окна не про дверь открывать так же нечего. Читаются ОБЕ формы `fallback` (§7) —
+	# одиночный эффект и массив: «прошло на первой» вторую не доказывает, а приводит их
+	# к списку одно место (`_as_effect_list`, как у `_check_fallback`).
+	for nested in [{"type": "unlock", "edge": "e_hall_vault"},
+			[{"type": "unlock", "edge": "e_hall_vault"}]]:
+		var unlock_fallback := _good()
+		unlock_fallback["windows"][0]["kind"] = "node_entered"
+		unlock_fallback["windows"][0]["trigger"] = {"type": "node_entered", "node": "vault"}
+		unlock_fallback["windows"][0]["options"][0]["effects"] = [{
+			"type": "engine_proposal", "id": "hold_door", "want": "дверь открыта",
+			"needs": "таймер возврата", "fallback": nested,
+		}]
+		for quality in ["good", "neutral", "bad", "safe"]:
+			unlock_fallback["windows"][0]["silence"][quality] = [{"type": "delay", "value": 3}]
+		t.eq("unlock в fallback (%s) окна не про дверь — BAD_VALUE на поле fallback"
+			% ("массив" if typeof(nested) == TYPE_ARRAY else "одиночный эффект"),
+			_codes_at(Validator.validate(unlock_fallback, null),
+				"windows.w_door.options[0].effects[0].fallback"), [Problems.BAD_VALUE])
+
+	# Испорченный триггер: корень уже назван на `trigger.type`, и об эффектах варианта не
+	# судим — второго следствия одному дефекту не выписываем (шапка валидатора).
+	var broken_trigger_options := _good()
+	broken_trigger_options["windows"][0]["trigger"] = {"type": "магия"}
+	t.eq("испорченный триггер — эффекты варианта не судятся вторым диагнозом",
+		_codes_at(Validator.validate(broken_trigger_options, null),
+			"windows.w_door.options[0].effects"), [])
 
 	# Выполнимость окна у двери. Окно срабатывает один раз за миссию (§4.2), а приказ
 	# может быть не отдан: если молчание не открывает ИМЕННО это ребро, группа останется
@@ -1066,6 +1188,32 @@ func run() -> Array:
 	t.eq("observed_at < 0 — BAD_VALUE",
 		_codes_at(Validator.validate(neg_observed, null), "intel[0].observed_at"), [Problems.BAD_VALUE])
 
+	# 11а. КАНАЛ ОБЯЗАН БЫТЬ ИЗ ПЕРЕЧНЯ. Значение `channel` адресует блок данных каналу на
+	# экране и ключам пояснений `intel.<канал>.<пометка>`; опечатка («agentss») проходила
+	# молча, и данные приезжали, не попав ни в один канал (находка 3 отчёта 11, §5.3). Перечень —
+	# `docs/spr/channels.md` §2: дрон, агентура, взлом. Имена каналов здесь написаны
+	# ЛИТЕРАЛАМИ, а не взяты у валидатора: эталон, производный от проверяемого, не поймал бы
+	# ни одного канала, выпавшего из списка (`review-checklist.md` §2).
+	for channel in ["drone", "agents", "hack"]:
+		var known_channel := _good()
+		known_channel["intel"] = [{"channel": channel, "observed_at": 0,
+			"entries": [{"kind": "sensor", "nodes": ["hall"], "age_hours": 6,
+				"false": channel == "agents"}]}]
+		t.eq("канал «%s» из перечня проходит" % channel,
+			Validator.validate(known_channel, null), [])
+
+	var unknown_channel := _good()
+	unknown_channel["intel"][0]["channel"] = "agentss"
+	var unknown_channel_problems: Array = Validator.validate(unknown_channel, null)
+	t.eq("неизвестный канал — BAD_VALUE на своём поле",
+		_codes_at(unknown_channel_problems, "intel[0].channel"), [Problems.BAD_VALUE])
+	## Ровно одна проблема: ложь считается только у ИЗВЕСТНОГО канала агентуры, и на
+	## «agentss» без подброшенных пунктов второго диагноза (`INTEL_LIE_COUNT`) не выписано.
+	t.eq("неизвестный канал — ровно BAD_VALUE, без INTEL_LIE_COUNT",
+		_codes(unknown_channel_problems), [Problems.BAD_VALUE])
+	t.is_true("неизвестный канал назван в сообщении",
+		_message_at(unknown_channel_problems, "intel[0].channel").contains("agentss"))
+
 	# M2. Ключи пояснений разведки адресуются по каналу и пометке: собрать их из данных
 	# нельзя, поэтому без префикса `intel.` они получали ложный DANGLING_TEXT.
 	var intel_texts := _texts_for(_good())
@@ -1108,9 +1256,10 @@ func run() -> Array:
 	# данных — и все обязательные системные ключи, которых данные не называют вовсе.
 	# Именно этот ассерт краснеет, если сверку ключей случайно отключить.
 	#
-	# Ключ, лежащий И в данных, И в обязательном списке (`mission.01.title`), назван здесь
-	# ОДИН раз — как `MISSING_TEXT` на своём поле: второго диагноза ему не выписывают
-	# (`validator.gd:_check_required_texts`), и кейс 14 держит это отдельным ассертом.
+	# Ключ, лежащий в данных (`mission.01.title` через `title_key`), назван здесь ОДИН раз —
+	# как `MISSING_TEXT` на своём поле: обязательный перечень его не дублирует
+	# (`validator.gd:_check_required_texts` пропускает ключи, на которые сослались данные), и
+	# кейс 14 держит это отдельными ассертами (14в и 14ж).
 	var expected_missing: Array = []
 	for _i in data_text_keys.size():
 		expected_missing.append(Problems.MISSING_TEXT)
@@ -1245,9 +1394,10 @@ func run() -> Array:
 	t.eq("ребро в себя — BAD_VALUE на самом ребре",
 		_codes_at(Validator.validate(self_loop, null), "edges[0]"), [Problems.BAD_VALUE])
 
-	# 12a-8. Соседние точки маршрута патруля соединены ребром (validator.gd:299): движок
-	# путь не ищет и на разрыве охранник застрянет. `entry → vault` ребра не имеет:
-	# есть только `entry → hall` и `hall → vault`.
+	# 12a-8. Соседние точки маршрута патруля соединены ребром: движок путь не ищет, узлы
+	# берутся из списка по индексу (`sim/sim.gd:_advance_guards`), и разрыв означает, что
+	# патруль оказывается в помещении, которого не проходит. `entry → vault` ребра не
+	# имеет: есть только `entry → hall` и `hall → vault`.
 	var route_gap := _good()
 	route_gap["patrols"][0]["route"] = ["entry", "vault"]
 	t.eq("разрыв между соседними точками патруля — BAD_VALUE на route",
@@ -1312,9 +1462,11 @@ func run() -> Array:
 	# «КОМАНДУЕТ» и без итогов.
 	#
 	# Эталон — `REQUIRED_TEXTS` в этом файле, а не константа валидатора (см. её шапку).
-	# Две стороны держатся вместе: цикл ниже снимает КАЖДЫЙ ключ эталона по одному —
-	# значит список валидатора не короче эталона; положительный ассерт на полном наборе —
-	# значит не длиннее (лишнее требование сделало бы его красным).
+	# Обе стороны держатся вместе циклом 14г, но разными правилами: 31 ключ эталона —
+	# обязательным перечнем (`MISSING_REQUIRED_TEXT`), `mission.01.title` — сверкой данных
+	# (`MISSING_TEXT` на `title_key`), потому что конвейерная константа не знает номера
+	# миссии (14ж). Положительный ассерт на полном наборе держит перечень от ЛИШНИХ
+	# требований: лишний обязательный ключ сделал бы его красным.
 	t.eq("эталон обязательных ключей — 32 ключа перечня (04-texts.md §4 + §3.1–3.2)",
 		REQUIRED_TEXTS.size(), 32)
 	var seen_keys: Dictionary = {}
@@ -1355,10 +1507,11 @@ func run() -> Array:
 	t.is_true("нет window.w_door.text — сообщение называет ключ",
 		_message_at(no_data_key_problems, "windows[0].text_key").contains("window.w_door.text"))
 
-	# 14в. ОДИН КЛЮЧ — ОДИН ДИАГНОЗ. `mission.01.title` лежит И в данных (`title_key`),
-	# И в обязательном списке: два диагноза (`MISSING_TEXT` от сверки данных и
-	# `MISSING_REQUIRED_TEXT` от нового правила) отправляли бы автора искать вторую
-	# причину, которой нет. Ровно один — и он на поле данных, где ключ и живёт.
+	# 14в. НАЗВАНИЕ МИССИИ: ОДИН КЛЮЧ — ОДИН ДИАГНОЗ, и путь на поле данных. `mission.01.title`
+	# лежит в данных (`title_key`) и потому второго правила не требует: пропажу называет
+	# сверка данных — `MISSING_TEXT` на своём поле, — а обязательный перечень его не
+	# дублирует (в нём этого ключа нет вовсе, см. 14ж). Два диагноза отправляли бы автора
+	# искать вторую причину, которой нет. Ровно один — и он там, где ключ и живёт.
 	var no_title := _texts_for(_good())
 	no_title.erase("mission.01.title")
 	var no_title_problems: Array = Validator.validate(_good(), no_title)
@@ -1382,6 +1535,55 @@ func run() -> Array:
 			_problems_naming(gapped_problems, key).size(), 1)
 		t.eq("снят обязательный ключ «%s» — и он единственный" % key,
 			gapped_problems.size(), 1)
+
+	# 14д. ПУСТЫЕ ТЕКСТЫ. Это исходная цель правила («сдача без системных текстов
+	# неполна»), и проверяется она здесь на ключе БЕЗ поля в данных: иначе «проблема есть»
+	# объяснялось бы сверкой данных, а не обязательным перечнем.
+	var empty_texts_problems: Array = Validator.validate(_good(), {})
+	t.eq("пустые тексты: обязательный ключ без поля в данных назван MISSING_REQUIRED_TEXT",
+		_codes_at(empty_texts_problems, "texts.log.silence"), [Problems.MISSING_REQUIRED_TEXT])
+
+	# 14е. УРЕЗАН ЦЕЛЫЙ БЛОК. Регресс этой проверки — не «пусто», а «усохло»: снятие всего
+	# блока `voice.` обязано назвать КАЖДЫЙ обязательный ключ блока своим диагнозом. Так
+	# правило не вырождается в «в текстах есть хоть что-то»: положительное «блок непуст»
+	# прошло бы и на одном уцелевшем ключе.
+	var no_voice := _texts_for(_good())
+	var voice_keys: Array = []
+	for key in REQUIRED_TEXTS:
+		if String(key).begins_with("voice."):
+			no_voice.erase(key)
+			voice_keys.append(String(key))
+	t.eq("корпус кейса непуст: в эталоне есть блок voice.", voice_keys.size(), 3)
+	var no_voice_problems: Array = Validator.validate(_good(), no_voice)
+	t.eq("урезан весь блок voice. — диагноз на КАЖДЫЙ ключ блока",
+		_codes(no_voice_problems),
+		[Problems.MISSING_REQUIRED_TEXT, Problems.MISSING_REQUIRED_TEXT, Problems.MISSING_REQUIRED_TEXT])
+	t.eq("урезан весь блок voice. — названы именно ключи блока",
+		_paths(no_voice_problems), ["texts.voice.kira.ack", "texts.voice.kira.command", "texts.voice.echo.joke"])
+
+	# 14ж. ПЕРЕЧЕНЬ НЕ ЗНАЕТ НОМЕРА МИССИИ. Это правка находки `review-03` §7.5: прежний
+	# первый элемент `mission.01.title` был ключом ОДНОЙ миссии, и миссия с
+	# `title_key = mission.02.title` получала ЛОЖНЫЙ диагноз на ключ чужой миссии. Название
+	# держит сверка данных, поэтому проверяются ОБЕ половины: с полным набором текстов
+	# проблем нет, а без своего названия — ровно один диагноз, на поле данных и про СВОЙ
+	# ключ. Первый ассерт краснеет, если в перечень вернут ключ с номером миссии; второй —
+	# если сверку данных отключат, приняв «проблем нет» за доказательство.
+	var second := _good()
+	second["title_key"] = "mission.02.title"
+	var second_texts := _texts_for(_good())
+	second_texts.erase("mission.01.title")
+	second_texts["mission.02.title"] = "ВТОРАЯ МИССИЯ"
+	t.eq("миссия 02 с полными текстами проходит без проблем: перечень не привязан к номеру миссии",
+		Validator.validate(second, second_texts), [])
+	var second_no_title := _texts_for(_good())
+	second_no_title.erase("mission.01.title")
+	var second_problems: Array = Validator.validate(second, second_no_title)
+	t.eq("миссия 02 без своего названия — ровно MISSING_TEXT, чужой ключ не назван",
+		_codes(second_problems), [Problems.MISSING_TEXT])
+	t.eq("миссия 02 без своего названия — путь на поле данных",
+		_paths(second_problems), ["title_key"])
+	t.is_true("миссия 02 без своего названия — сообщение называет СВОЙ ключ",
+		_message_at(second_problems, "title_key").contains("mission.02.title"))
 
 	# 15. ФОРМА ПРЕЗЕНТАЦИИ: координаты помещений, подписи, название комплекса и этажи
 	# (`design-presentation-data.md` §2 и §8; `levels/mission-01.md` §3–4). Поля
