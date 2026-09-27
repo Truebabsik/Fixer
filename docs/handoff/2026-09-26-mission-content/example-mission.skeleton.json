@@ -1,0 +1,165 @@
+{
+  "_comment": "ОБРАЗЕЦ ФОРМЫ. Это не контент миссии, а скелет: он показывает структуру файла и связи между разделами. Числа и названия здесь условны. Скопируй структуру, замени содержимое. В настоящем файле поля _comment быть не должно — комментарии в JSON запрещены.",
+  "id": "mission-01",
+  "title_key": "mission.01.title",
+  "nodes": {
+    "main_entry1": { "floor": 1, "tags": ["entry"] },
+    "dock1":       { "floor": 1, "tags": ["entry"] },
+    "hall1":       { "floor": 1, "tags": [] },
+    "lift_main1":  { "floor": 1, "tags": ["lift_main"] },
+    "lift_freight1": { "floor": 1, "tags": ["lift_freight"] },
+    "stair1":      { "floor": 1, "tags": ["stair"] },
+    "stair2":      { "floor": 2, "tags": ["stair"] },
+
+    "office2":  { "floor": 2, "tags": ["office"] },
+    "kitchen2": { "floor": 2, "tags": ["office"] },
+    "term2":    { "floor": 2, "tags": ["terminal"] },
+
+    "floor3": { "floor": 3, "tags": [] },
+
+    "it4":     { "floor": 4, "tags": ["server"] },
+    "term4":   { "floor": 4, "tags": ["terminal"] },
+
+    "floor5": { "floor": 5, "tags": [] },
+    "term5":  { "floor": 5, "tags": ["terminal"] },
+
+    "roof":     { "floor": 6, "tags": ["entry", "roof"] },
+    "archive0": { "floor": -1, "tags": ["cold_archive"] }
+  },
+  "edges": [
+    { "id": "e_main_hall",      "a": "main_entry1", "b": "hall1",      "kind": "door",         "steps": 1, "noise": 0 },
+    { "id": "e_dock_hall",      "a": "dock1",       "b": "hall1",      "kind": "corridor",     "steps": 1, "noise": 0 },
+    { "id": "e_hall_liftmain",  "a": "hall1",       "b": "lift_main1", "kind": "corridor",     "steps": 1, "noise": 0 },
+    { "id": "e_hall_freight",   "a": "hall1",       "b": "lift_freight1", "kind": "corridor",  "steps": 1, "noise": 0 },
+    { "id": "e_hall_stair1",    "a": "hall1",       "b": "stair1",     "kind": "corridor",     "steps": 1, "noise": 0 },
+
+    { "id": "e_stair_1_2",      "a": "stair1",      "b": "stair2",     "kind": "stairs",       "steps": 3, "noise": 0 },
+    { "id": "e_stair2_office2", "a": "stair2",      "b": "office2",    "kind": "door",         "steps": 1, "noise": 0 },
+    { "id": "e_office_kitchen", "a": "office2",     "b": "kitchen2",   "kind": "corridor",     "steps": 1, "noise": 0 },
+    { "id": "e_office_term2",   "a": "office2",     "b": "term2",      "kind": "door",         "steps": 1, "noise": 0 },
+
+    { "id": "e_office_it4",     "a": "office2",     "b": "it4",        "kind": "stairs",       "steps": 12, "noise": 0, "locked": true,
+      "_comment": "биометрия на серверной: это ОКНО, а не просто дверь" },
+    { "id": "e_it4_term4",      "a": "it4",         "b": "term4",      "kind": "door",         "steps": 1, "noise": 0 },
+    { "id": "e_it4_floor5",     "a": "it4",         "b": "floor5",     "kind": "stairs",       "steps": 3, "noise": 0 },
+
+    { "id": "e_roof_floor5",    "a": "roof",        "b": "floor5",     "kind": "door",         "steps": 2, "noise": 0 },
+    { "id": "e_floor5_term5",   "a": "floor5",      "b": "term5",      "kind": "door",         "steps": 1, "noise": 0 },
+
+    { "id": "e_liftmain_1_5",   "a": "lift_main1",  "b": "floor5",     "kind": "lift_main",    "steps": 2, "noise": 4 },
+    { "id": "e_freight_1_4",    "a": "lift_freight1", "b": "it4",      "kind": "lift_freight", "steps": 3, "noise": 4 },
+    { "id": "e_freight_4_0",    "a": "it4",         "b": "archive0",   "kind": "lift_freight", "steps": 3, "noise": 4 },
+    { "id": "e_stair_2_0",      "a": "stair2",      "b": "archive0",   "kind": "stairs",       "steps": 3, "noise": 0 }
+  ],
+  "patrols": [
+    { "id": "guard_1", "route": ["hall1", "main_entry1"], "period": 4 },
+    { "id": "guard_2", "route": ["floor3", "it4"],        "period": 4 },
+    { "id": "guard_3", "route": ["floor5", "term5"],      "period": 6 }
+  ],
+  "sensors": [
+    { "id": "s_hall1", "nodes": ["hall1", "main_entry1"] },
+    { "id": "s_it4",   "nodes": ["it4"] },
+    { "id": "s_arch0", "nodes": ["archive0"] }
+  ],
+  "objective": "archive0",
+  "windows": [
+    {
+      "id": "w_bio_door",
+      "kind": "locked_edge",
+      "trigger": { "type": "locked_edge", "edge": "e_office_it4" },
+      "text_key": "window.w_bio_door.text",
+      "options": [
+        { "id": "breach", "text_key": "window.w_bio_door.breach", "complexity": 1,
+          "cost": { "noise": 12, "delay": 0 },
+          "effects": [{ "type": "unlock", "edge": "e_office_it4" }],
+          "note": "грубая сила: быстро и очень громко — почти гарантированная тревога" },
+        { "id": "pick", "text_key": "window.w_bio_door.pick", "complexity": 2,
+          "cost": { "noise": 1, "delay": 4 },
+          "effects": [{ "type": "unlock", "edge": "e_office_it4" }],
+          "note": "знание и время вместо шума" },
+        { "id": "cut_power", "text_key": "window.w_bio_door.cut_power", "complexity": 2,
+          "cost": { "noise": 4, "delay": 2 },
+          "effects": [{ "type": "unlock", "edge": "e_office_it4" }],
+          "note": "компромисс: датчик обесточен, но об этом узнают" }
+      ],
+      "silence": {
+        "text_key": "window.w_bio_door.silence",
+        "by": "tactician",
+        "effect": { "type": "reroute", "node": "office2", "delay": 3, "noise": 5 }
+      }
+    },
+    {
+      "id": "w_echo_reads",
+      "kind": "node_entered",
+      "trigger": { "type": "node_entered", "node": "archive0" },
+      "text_key": "window.w_echo_reads.text",
+      "options": [
+        { "id": "stop", "text_key": "window.w_echo_reads.stop", "complexity": 1,
+          "cost": { "noise": 0, "delay": 0 },
+          "effects": [{ "type": "noop" }] },
+        { "id": "let_read", "text_key": "window.w_echo_reads.let_read", "complexity": 1,
+          "cost": { "noise": 0, "delay": 2 },
+          "effects": [{ "type": "engine_proposal",
+                        "id": "reveal_operation",
+                        "want": "Игрок узнаёт, что это дело о собственной операции",
+                        "needs": "флаг раскрытия и его показ в «Итогах»",
+                        "fallback": { "type": "delay", "value": 2 } }] }
+      ],
+      "silence": {
+        "text_key": "window.w_echo_reads.silence",
+        "by": "comms",
+        "effect": { "type": "delay", "value": 2 }
+      }
+    }
+  ],
+  "intel": [
+    {
+      "channel": "hack",
+      "observed_at": 0,
+      "entries": [
+        { "kind": "patrol", "id": "guard_2", "route": ["floor3", "it4"], "period": 4,
+          "age_hours": 8, "false": false, "note_key": "intel.hack.patrol_ok" },
+        { "kind": "door_state", "node": "it4", "age_hours": 8, "false": false,
+          "note_key": "intel.hack.it4_door_closed" }
+      ]
+    },
+    {
+      "channel": "agents",
+      "observed_at": 0,
+      "entries": [
+        { "kind": "patrol", "id": "guard_2", "route": ["floor4", "stair2"], "period": 6,
+          "age_hours": 6, "false": true,
+          "note_key": "intel.agents.patrol_false",
+          "note": "ЕДИНСТВЕННЫЙ подброшенный пункт миссии — ложное расписание обхода на 4-м" },
+        { "kind": "guard_count", "node": "it4", "count": 1, "age_hours": 6, "false": false,
+          "note_key": "intel.agents.it4" }
+      ]
+    },
+    {
+      "channel": "drone",
+      "observed_at": 0,
+      "entries": [
+        { "kind": "guard_count", "node": "roof", "count": 0, "age_hours": 24, "false": false,
+          "note_key": "intel.drone.roof" }
+      ]
+    }
+  ],
+  "access_points": [
+    {
+      "id": "ap_term5",
+      "node": "term5",
+      "kind": "terminal",
+      "text_key": "ap.ap_term5.text",
+      "actions": [
+        { "id": "copy_data", "text_key": "ap.ap_term5.copy_data", "complexity": 1,
+          "cost": { "steps": 4 }, "effects": [{ "type": "trace", "value": 3 }] },
+        { "id": "take_money", "text_key": "ap.ap_term5.take_money", "complexity": 1,
+          "cost": { "steps": 3 },
+          "effects": [{ "type": "money", "value": 40 }, { "type": "trace", "value": 8 }],
+          "note": "единственный способ получить деньги внутри операции; вход в эфир не нужен — это не приказ" },
+        { "id": "leave", "text_key": "ap.ap_term5.leave", "complexity": 1,
+          "cost": { "steps": 0 }, "effects": [{ "type": "noop" }] }
+      ]
+    }
+  ]
+}
