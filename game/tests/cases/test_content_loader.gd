@@ -119,6 +119,35 @@ func run() -> Array:
 	var res := Loader.load_mission(fixture_data, _texts_for(fixture_data))
 	t.is_true("словарь загружен без проблем", (res["problems"] as Array).is_empty())
 	t.is_true("миссия собрана", res["mission"] != null)
+
+	# 16. ПОЛЯ ПРЕЗЕНТАЦИИ (координаты, подписи, этажи) в конвейере: миссия БЕЗ них
+	# обязана собираться, миссия С ними — тоже. Это вторая половина требования
+	# «необязательное поле»: валидатор про них молчит (кейс 15а валидатора), а загрузчик
+	# обязан отдать МОДЕЛЬ, а не отказ. Тексты собираются обходом `*_key` (`_texts_for`),
+	# поэтому подписи помещений, этажей и комплекса попадают в фикстуру сами.
+	var plain := Loader.load_mission(_fixture_data(), _texts_for(_fixture_data()))
+	t.is_true("миссия БЕЗ полей презентации собирается", plain["mission"] != null)
+
+	var shown_data := _fixture_data()
+	shown_data["facility_key"] = "facility.meridian"
+	shown_data["floors"] = {"-1": {"name_key": "floor.-1"}, "1": {"name_key": "floor.1"}}
+	## Координаты — ЧИСЛАМИ С ПЛАВАЮЩЕЙ ТОЧКОЙ, как их отдаёт `JSON.parse`: реальный файл
+	## идёт именно этим путём, и «целое» в нём проверяет валидатор, а не загрузчик.
+	shown_data["nodes"]["dock"]["pos"] = {"x": 0.0, "y": 0.0}
+	shown_data["nodes"]["dock"]["name_key"] = "room.dock"
+	shown_data["nodes"]["archive0"]["pos"] = {"x": 8.0, "y": -4.0}
+	shown_data["nodes"]["archive0"]["name_key"] = "room.archive0"
+	var shown_loaded := Loader.load_mission(shown_data, _texts_for(shown_data))
+	t.is_true("миссия С полями презентации собирается: %s" % str(_codes(shown_loaded["problems"])),
+		shown_loaded["mission"] != null)
+
+	## Слой решён так: координаты и подписи — данные ПОКАЗА, в модель миссии
+	## (`Mission.nodes` — жёсткое API ядра) они не едут. Ассерт держит границу от
+	## молчаливого расширения: загрузчик кладёт в узел ровно `floor` и `tags`.
+	if shown_loaded["mission"] != null:
+		t.eq("модель узла — жёсткое API (floor, tags), поля презентации в неё не едут",
+			_keys(shown_loaded["mission"].nodes["dock"]), ["floor", "tags"])
+
 	## Ранний выход ПОСЛЕ ассертов, но ДО первых обращений к модели: без него провал
 	## валидатора (например, фикстура текстов разошлась с обязательными системными
 	## ключами) ронял кейс рантаймом на `loaded.id`, и раннер печатал `LOAD FAIL` —

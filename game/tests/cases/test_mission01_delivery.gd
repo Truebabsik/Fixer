@@ -10,15 +10,15 @@ extends RefCounted
 ## не прогонялся ни разу, а самопроверка генератора кодировала его же неверную схему.
 ## Этот кейс делает такое положение невозможным: испорченный артефакт краснит набор.
 ##
-## Числа разделов (28/33/11/167/18) — ФАКТ ЭТОЙ ПОСТАВКИ, а не инвариант движка: у другой
+## Числа разделов (28/33/11/203/18) — ФАКТ ЭТОЙ ПОСТАВКИ, а не инвариант движка: у другой
 ## миссии они другие, и «28 помещений» требованием схемы не является. Смысл проверки —
 ## «собранное не пустышка»: если загрузчик молча отдаст огрызок, число это назовёт.
 ## Меняет уровень автор — вместе с числами здесь; покрасневший кейс это и скажет.
 ##
-## 167 ключей текстов и 18 заявок — не «числа вообще», а след решения владельца: 44 ключа
+## 203 ключа текстов и 18 заявок — не «числа вообще», а след решения владельца: 44 ключа
 ## качеств молчания (`window.<id>.silence.<quality>`) добавились к 123, а заявка
 ## `reveal_operation_silence` переехала в исход `bad` окна `w_echo_reads` (D41: в `safe`,
-## ветке «связиста нет», Эхо в группе нет), оставаясь в счёте (17 → 18).
+## ветке «связиста нет», Эхо в группе нет), оставаясь в счёте (17 → 18). Из них 36 — подписи схемы: 28 помещений (`room.`), 7 этажей (`floor.`) и комплекс (`facility.`); они выводятся из данных, и `UNUSED_OK_PREFIXES` их не покрывает намеренно.
 ##
 ## ПОРЯДОК ПРОВЕРОК НЕ СЛУЧАЕН. Всё, что судит о ФАЙЛЕ, стоит до раннего выхода по
 ## несобранной миссии; всё, что судит о МОДЕЛИ, — после сборки. Если поставить проверку
@@ -37,6 +37,7 @@ const Problems := preload("res://content/problems.gd")
 const Validator := preload("res://content/validator.gd")
 const Loader := preload("res://content/loader.gd")
 const Mission := preload("res://sim/mission.gd")
+const Harness := preload("res://sim/harness.gd")
 
 ## Пути от корня проекта: `res://` — это `game/`, канонический артефакт живёт в `content/`.
 const MISSION_PATH := "res://content/mission-01.json"
@@ -46,8 +47,15 @@ const TEXTS_PATH := "res://content/texts.ru.json"
 const DELIVERY_NODES := 28
 const DELIVERY_EDGES := 33
 const DELIVERY_WINDOWS := 11
-const DELIVERY_TEXTS := 167
+const DELIVERY_TEXTS := 203
 const DELIVERY_PROPOSALS := 18
+## Этажи поставки: подвал, 1–5 и кровля. Тоже факт уровня (`levels/mission-01.md` §3),
+## а не инвариант движка: у другой миссии этажей меньше или больше.
+const DELIVERY_FLOORS := 7
+## Шаг сетки координат. Помещения стоят в узлах с шагом 4, коробка помещения рисуется 3×3,
+## поэтому «не наезжают» = расстояние Чебышёва между любыми двумя помещениями одного этажа
+## не меньше шага: между коробками остаётся минимум 1.
+const GRID_STEP := 4
 
 ## Исходы молчания — тот же список, что у валидатора (`validator.gd:SILENCE_QUALITIES`).
 ## Здесь он продублирован осознанно: кейс обязан назвать пропавший исход по имени, даже
@@ -135,6 +143,87 @@ func _collect_proposal_ids(effects: Array, out: Array) -> void:
 			_collect_proposal_ids(fallback, out)
 
 
+## Координаты узла как целые: `Vector2i(x, y)` или `null`, если форма не та. Числа из JSON
+## приходят `float`, поэтому «целое» проверяется через `Loader.to_int` — тем же правилом,
+## что и в загрузчике, а не второй его копией. Кейс не падает на кривом поле: `null`
+## означает «координаты нет», и это называет ассерт, а не рантайм.
+func _pos_of(data: Dictionary, node_id: String):
+	var nodes = data.get("nodes", null)
+	if typeof(nodes) != TYPE_DICTIONARY:
+		return null
+	var node = (nodes as Dictionary).get(node_id, null)
+	if typeof(node) != TYPE_DICTIONARY:
+		return null
+	var pos = (node as Dictionary).get("pos", null)
+	if typeof(pos) != TYPE_DICTIONARY:
+		return null
+	var x: Variant = Loader.to_int((pos as Dictionary).get("x", null))
+	var y: Variant = Loader.to_int((pos as Dictionary).get("y", null))
+	if x == null or y == null:
+		return null
+	return Vector2i(int(x), int(y))
+
+
+## Номер этажа узла строкой или пустая строка, если он не читается. Кейс не имеет права
+## падать рантаймом на испорченном поле: тогда он потерял бы ВСЕ свои ассерты вместе
+## с уже собранным диагнозом (F1 ревью 2), а об испорченном поле уже сказал валидатор.
+func _floor_of(node) -> String:
+	if typeof(node) != TYPE_DICTIONARY:
+		return ""
+	var value: Variant = Loader.to_int((node as Dictionary).get("floor", null))
+	if value == null:
+		return ""
+	return str(int(value))
+
+
+## Узлы рёбер заданного вида: их x и множество этажей. Возвращает
+## `{"x": Array[int], "floors": Array[String]}` — x уникальны и отсортированы, этажи тоже.
+## Так одна вертикальная связь обязана дать ОДИН x (вертикаль на стопке этажных схем)
+## и свой набор этажей, а связь, «размазанная» по двум колонкам, назовётся провалом.
+func _column_of(data: Dictionary, kind: String) -> Dictionary:
+	var xs: Array = []
+	var floors: Array = []
+	var nodes = data.get("nodes", null)
+	var edges_raw = data.get("edges", null)
+	if typeof(nodes) != TYPE_DICTIONARY or typeof(edges_raw) != TYPE_ARRAY:
+		return {"x": xs, "floors": floors}
+	var node_map: Dictionary = nodes
+	for e in (edges_raw as Array):
+		if typeof(e) != TYPE_DICTIONARY or str((e as Dictionary).get("kind", "")) != kind:
+			continue
+		for side in ["a", "b"]:
+			var node_id := str((e as Dictionary).get(side, ""))
+			if not node_map.has(node_id):
+				continue
+			var point = _pos_of(data, node_id)
+			if point == null:
+				continue
+			var p: Vector2i = point
+			if not xs.has(p.x):
+				xs.append(p.x)
+			var floor_no := _floor_of(node_map[node_id])
+			if floor_no != "" and not floors.has(floor_no):
+				floors.append(floor_no)
+	xs.sort()
+	floors.sort()
+	return {"x": xs, "floors": floors}
+
+
+## Копия данных миссии БЕЗ полей презентации: координаты помещений, их подписи, этажи и
+## название комплекса. Второй вход пробы «координаты не влияют на симуляцию»; копия
+## делается `duplicate(true)`, поэтому читаемые из файла данные проба не трогает.
+func _without_presentation(data: Dictionary) -> Dictionary:
+	var out: Dictionary = data.duplicate(true)
+	out.erase("floors")
+	out.erase("facility_key")
+	for node_id in (out["nodes"] as Dictionary):
+		var node = (out["nodes"] as Dictionary)[node_id]
+		if typeof(node) == TYPE_DICTIONARY:
+			(node as Dictionary).erase("pos")
+			(node as Dictionary).erase("name_key")
+	return out
+
+
 func run() -> Array:
 	var t := Assert.new()
 
@@ -178,6 +267,127 @@ func run() -> Array:
 		% Validator.REQUIRED_TEXT_KEYS.size(), not Validator.REQUIRED_TEXT_KEYS.is_empty())
 	t.eq("обязательные системные ключи есть в поставке: %s" % _join(required_gaps),
 		required_gaps, [])
+
+	# 3б. ПОЛЯ ПРЕЗЕНТАЦИИ в поставке (`design-presentation-data.md` §8): экран операции
+	# рисует схему этажа, и рисовать её нечем, если у помещений нет координат и подписей.
+	# Проверяется ФАКТ поставки, а не форма схемы (форму держат кейсы 15 валидатора и 16
+	# загрузчика): `pos` и `name_key` у КАЖДОГО помещения, текст к каждой подписи.
+	# Нарушители собираются списком: провал обязан назвать помещение, а не «что-то не так».
+	## Раздел читается с охраной: `nodes` может быть испорчен, и тогда `data["nodes"]`
+	## уронил бы кейс рантаймом. Пустой корпус называет отдельный ассерт ниже.
+	var nodes_raw = data.get("nodes", null)
+	var node_map: Dictionary = nodes_raw if typeof(nodes_raw) == TYPE_DICTIONARY else {}
+	t.is_true("корпус помещений непуст (узлов: %d)" % node_map.size(), not node_map.is_empty())
+	var missing_pos: Array = []
+	var missing_name: Array = []
+	var caption_without_text: Array = []
+	for node_id in node_map:
+		var id := str(node_id)
+		if _pos_of(data, id) == null:
+			missing_pos.append(id)
+		var node = node_map[node_id]
+		var name_key := ""
+		if typeof(node) == TYPE_DICTIONARY and (node as Dictionary).has("name_key"):
+			name_key = str((node as Dictionary)["name_key"])
+		if name_key == "":
+			missing_name.append(id)
+		elif not (texts as Dictionary).has(name_key):
+			caption_without_text.append("%s → %s" % [id, name_key])
+	t.eq("у каждого помещения есть координаты (нет pos: %s)" % _join(missing_pos),
+		missing_pos, [])
+	t.eq("у каждого помещения есть подпись (нет name_key: %s)" % _join(missing_name),
+		missing_name, [])
+	t.eq("текст есть у каждой подписи помещения (нет текста: %s)" % _join(caption_without_text),
+		caption_without_text, [])
+
+	# 3в. Этажи и комплекс. Запись этажа обязана нести `name_key`, и текст к нему обязан
+	# быть: подпись этажа приходит на экран ключом, а не строкой в данных.
+	var floors_raw = data.get("floors", null)
+	var floors: Dictionary = floors_raw if typeof(floors_raw) == TYPE_DICTIONARY else {}
+	var floor_gaps: Array = []
+	for floor_no in floors:
+		var entry = floors[floor_no]
+		if typeof(entry) != TYPE_DICTIONARY or not (entry as Dictionary).has("name_key"):
+			floor_gaps.append("%s: нет name_key" % str(floor_no))
+			continue
+		var floor_key := str((entry as Dictionary)["name_key"])
+		if not (texts as Dictionary).has(floor_key):
+			floor_gaps.append("%s → %s: нет текста" % [str(floor_no), floor_key])
+	t.eq("поставка: этажей %d" % DELIVERY_FLOORS, floors.size(), DELIVERY_FLOORS)
+	t.eq("у каждого этажа есть подпись и текст к ней: %s" % _join(floor_gaps), floor_gaps, [])
+
+	## Каждый этаж, на котором стоят помещения, обязан иметь запись: иначе на схеме этого
+	## этажа не будет подписи. Ожидание выводится из ДАННЫХ (номер этажа → подпись),
+	## поэтому пропавшая запись называется номером, а не «этажей стало меньше».
+	var uncaptioned_floors: Array = []
+	for node_id in node_map:
+		var floor_no := _floor_of(node_map[node_id])
+		if floor_no == "":
+			continue
+		if not floors.has(floor_no) and not uncaptioned_floors.has(floor_no):
+			uncaptioned_floors.append(floor_no)
+	t.eq("на каждый этаж с помещениями есть запись в floors (нет: %s)" % _join(uncaptioned_floors),
+		uncaptioned_floors, [])
+
+	var facility_raw = data.get("facility_key", null)
+	var facility_key := String(facility_raw) if typeof(facility_raw) == TYPE_STRING else ""
+	t.is_true("название комплекса задано ключом строкой (получено: %s)" % str(facility_raw),
+		typeof(facility_raw) == TYPE_STRING)
+	t.is_true("текст названия комплекса есть в поставке (ключ: «%s»)" % facility_key,
+		facility_key != "" and (texts as Dictionary).has(facility_key))
+
+	# 3г. СЕТКА КООРДИНАТ: помещения одного этажа не наезжают. Проверяются ВСЕ пары своего
+	# этажа, а не соседи по списку, и расстояние берётся Чебышёва: на шаге 4 и коробке 3×3
+	# это ровно «между двумя помещениями остаётся зазор». Счётчик пар рядом — защита от
+	# вырождения: «нарушителей нет» на пустом обходе неотличимо от «ничего не проверено».
+	var by_floor: Dictionary = {}
+	for node_id in node_map:
+		var floor_no := _floor_of(node_map[node_id])
+		if floor_no == "":
+			continue
+		var bucket: Array = by_floor.get(floor_no, [])
+		var point = _pos_of(data, str(node_id))
+		if point != null:
+			bucket.append({"id": str(node_id), "p": point})
+		by_floor[floor_no] = bucket
+	var overlaps: Array = []
+	var pairs_checked := 0
+	for floor_no in by_floor:
+		var items: Array = by_floor[floor_no]
+		for i in items.size():
+			for j in range(i + 1, items.size()):
+				pairs_checked += 1
+				var a: Vector2i = items[i]["p"]
+				var b: Vector2i = items[j]["p"]
+				var gap: int = max(absi(a.x - b.x), absi(a.y - b.y))
+				if gap < GRID_STEP:
+					overlaps.append("%s и %s на этаже %s: расстояние %d"
+						% [items[i]["id"], items[j]["id"], str(floor_no), gap])
+	t.is_true("пар помещений одного этажа проверено: %d" % pairs_checked, pairs_checked > 0)
+	t.eq("помещения одного этажа не наезжают (шаг сетки %d): %s" % [GRID_STEP, _join(overlaps)],
+		overlaps, [])
+
+	# 3д. ТРИ ВЕРТИКАЛЬНЫЕ СВЯЗИ читаются как ТРИ РАЗНЫХ пути (`levels/mission-01.md` §4):
+	# лестница (ЛК), пассажирский лифт (Л1) и грузовой лифт (Л2). Связи берутся из РЁБЕР по
+	# виду (`kind`) — то, что видит ядро, — а не из имён помещений: каждая связь обязана
+	# стоять ОДНОЙ вертикалью (один x на всех её этажах), и три вертикали обязаны стоять
+	# на РАЗНЫХ x. Набор этажей у каждой свой: ЛК ходит всюду, включая подвал; Л1 только
+	# 1↔5; Л2 — док ↔ 1…4 ↔ подвал. Это и есть «три пути», а не три имени одной шахты.
+	var columns: Dictionary = {}
+	for kind in ["stairs", "lift_main", "lift_freight"]:
+		columns[kind] = _column_of(data, kind)
+		var column_x: Array = (columns[kind] as Dictionary)["x"]
+		t.eq("связь «%s» — одна вертикаль (x: %s)" % [kind, str(column_x)], column_x.size(), 1)
+	var used_x: Array = []
+	for kind in ["stairs", "lift_main", "lift_freight"]:
+		var column_x: Array = (columns[kind] as Dictionary)["x"]
+		if column_x.size() == 1 and not used_x.has(column_x[0]):
+			used_x.append(column_x[0])
+	t.eq("три связи стоят на трёх разных x: %s" % str(used_x), used_x.size(), 3)
+	t.eq("ЛК: этажи связи", (columns["stairs"] as Dictionary)["floors"],
+		["-1", "1", "2", "3", "4", "5"])
+	t.eq("Л1: этажи связи", (columns["lift_main"] as Dictionary)["floors"], ["1", "5"])
+	t.eq("Л2: этажи связи", (columns["lift_freight"] as Dictionary)["floors"], ["-1", "1", "4"])
 
 	var windows := _windows_of(data)
 
@@ -388,5 +598,46 @@ func run() -> Array:
 	t.eq("собранная модель без проблем Mission.validate: %s"
 		% ("; ".join(model_problems) if not model_problems.is_empty() else "(проблем нет)"),
 		model_problems, [])
+
+	# 11. КООРДИНАТЫ НЕ ВЛИЯЮТ НА СИМУЛЯЦИЮ. Прогон миссии с полями презентации и прогон
+	# той же миссии с ВЫРЕЗАННЫМИ полями обязаны дать один и тот же `harness.digest`:
+	# координаты — данные показа, ядро их не читает (в `Mission.nodes` им и попасть некуда —
+	# загрузчик кладёт туда `floor` и `tags`, кейс 16 загрузчика). Оба входа идут через
+	# валидатор и загрузчик с `texts = null` (тексты в прогон не входят, и вырезанные
+	# подписи не дают ложного `DANGLING_TEXT`), поэтому различаются они РОВНО полями
+	# презентации. Рядом — проба на невырожденность сравнения: смысловая правка данных
+	# (шум первого ребра маршрута) обязана отпечаток ИЗМЕНИТЬ.
+	#
+	# Мутационная проба ассерта «один и тот же harness.digest» — в отчёте задачи 10:
+	# правка `loader.gd`, после которой обработка узла зависит от наличия `pos` (одно
+	# место), краснит его: вырезанный вход перестаёт быть той же миссией.
+	var run_plan := Loader.load_plan({
+		"route": ["main_entry1", "reception1", "hall1", "stair1", "stair2", "hall2",
+			"kitchen2", "hall2", "term2", "hall2", "stair2", "stair1", "hall0", "archive0"],
+		"exit_node": "hall0",
+		"agents": [{"id": "kira", "role": "tactician", "understanding": 3},
+			{"id": "echo", "role": "comms", "understanding": 3}],
+	})
+	var shown_mission = Loader.load_mission(data, null)["mission"]
+	var plain_mission = Loader.load_mission(_without_presentation(data), null)["mission"]
+	t.is_true("миссия с координатами собрана", shown_mission != null)
+	t.is_true("миссия без координат собрана", plain_mission != null)
+	if shown_mission == null or plain_mission == null:
+		return t.results
+	var with_pos: Dictionary = Harness.run_scenario(shown_mission, run_plan, [], {"seed": 5})
+	var without_pos: Dictionary = Harness.run_scenario(plain_mission, run_plan, [], {"seed": 5})
+	t.is_true("прогон по поставке состоялся (исход: %s)" % str(with_pos["outcome"]),
+		str(with_pos["outcome"]) != "" and str(with_pos["outcome"]) != "invalid_mission")
+	t.eq("координаты не влияют на симуляцию: один и тот же harness.digest",
+		String(without_pos["digest"]), String(with_pos["digest"]))
+
+	var loud_data := _without_presentation(data)
+	(loud_data["edges"] as Array)[0]["noise"] = int((loud_data["edges"] as Array)[0]["noise"]) + 5
+	var loud_mission = Loader.load_mission(loud_data, null)["mission"]
+	t.is_true("миссия со смысловой правкой собрана", loud_mission != null)
+	if loud_mission != null:
+		var loud_run: Dictionary = Harness.run_scenario(loud_mission, run_plan, [], {"seed": 5})
+		t.is_true("смысловая правка данных меняет отпечаток (сравнение не вырождено)",
+			String(loud_run["digest"]) != String(with_pos["digest"]))
 
 	return t.results

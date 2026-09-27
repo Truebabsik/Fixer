@@ -21,9 +21,21 @@ const Mission := preload("res://sim/mission.gd")
 ## «сцены не будет» на сцене, которая есть.
 const Response := preload("res://sim/response.gd")
 
+## `floors` и `facility_key` — поля ФОРМЫ ПРЕЗЕНТАЦИИ: экран операции рисует схему этажа
+## с подписями помещений, а взять их неоткуда (`design-presentation-data.md` §2 и §8).
+## Оба НЕобязательны: уровень без координат, подписей и этажей обязан оставаться валидным
+## и грузиться — это условие приёмки формы, а не пожелание (кейс 15а).
 const ROOT_KEYS := ["id", "title_key", "nodes", "edges", "patrols", "sensors",
-	"objective", "windows", "intel", "access_points", "note"]
-const NODE_KEYS := ["floor", "tags", "note"]
+	"objective", "windows", "intel", "access_points", "floors", "facility_key", "note"]
+## `pos` и `name_key` — та же форма презентации на узле: координаты помещения на схеме
+## этажа и ключ подписи (`room.<node_id>`, значение — в текстах). Оба необязательны.
+const NODE_KEYS := ["floor", "tags", "pos", "name_key", "note"]
+## Разрешённые поля координаты: обе оси и `note` (02-format.md §1 разрешает его в любом
+## объекте). Список закрыт намеренно: опечатка в имени оси обязана назваться
+## `UNKNOWN_KEY`, а не выглядеть как «координаты нет».
+const POS_KEYS := ["x", "y", "note"]
+## Разрешённые поля записи этажа (`floors.<номер>`): `name_key` внутри обязателен.
+const FLOOR_KEYS := ["name_key", "note"]
 const EDGE_KEYS := ["id", "a", "b", "kind", "steps", "noise", "locked", "note"]
 const PATROL_KEYS := ["id", "route", "period", "note"]
 const SENSOR_KEYS := ["id", "nodes", "note"]
@@ -109,10 +121,10 @@ const REQUIRED_TEXT_KEYS := [
 ##
 ## Прежний долг, записанный здесь («обязательные группы `log.*`, `voice.*`, `final.*`,
 ## `outcome.*`, `results.*` не проверяются: текстов ноль, и такая проверка давала бы только
-## ложные срабатывания»), ЗАКРЫТ: тексты поставки есть (167 ключей, все 32 обязательных на
-## месте), и пропажа обязательного ключа — реальный дефект контента, который обязан
-## называться. Проверка живёт в `_check_required_texts`, код проблемы —
-## `MISSING_REQUIRED_TEXT`.
+## ложные срабатывания»), ЗАКРЫТ: тексты поставки есть (все 32 обязательных ключа на
+## месте, число ключей поставки держит кейс доставки), и пропажа обязательного ключа —
+## реальный дефект контента, который обязан называться. Проверка живёт в
+## `_check_required_texts`, код проблемы — `MISSING_REQUIRED_TEXT`.
 const UNUSED_OK_PREFIXES := ["mission.", "negotiation.", "team.", "log.", "voice.",
 	"final.", "outcome.", "results.", "intel."]
 
@@ -157,6 +169,7 @@ static func validate(data, texts) -> Array:
 	_check_root_keys(data, problems)
 	_check_sections(data, problems)
 	_check_notes(data, "", problems)
+	_check_floors(data, problems)
 	var nodes := _check_nodes(data, problems)
 	_check_edges(data, nodes, problems)
 	_check_patrols(data, nodes, problems)
@@ -268,6 +281,13 @@ static func _check_root_keys(data: Dictionary, problems: Array) -> void:
 			problems.append(Problems.missing_field(name, required[1]))
 		else:
 			_expect_type(data[name], required[1], name, problems)
+	## `facility_key` — НЕобязательное корневое поле (ключ названия комплекса). Тип
+	## проверяется по факту поля, как у `trace_key` точки доступа: без этой проверки
+	## испорченное поле молча выпадает из сбора текстовых ключей (`_walk_text_keys` берёт
+	## только строки), и текст, на который оно ссылалось, объявляется висячим — автор
+	## получает `DANGLING_TEXT` про текст, которого не терял, не видя кривого поля.
+	if data.has("facility_key"):
+		_string_or(data["facility_key"], "facility_key", problems)
 
 
 static func _check_nodes(data: Dictionary, problems: Array) -> Dictionary:
@@ -290,8 +310,67 @@ static func _check_nodes(data: Dictionary, problems: Array) -> Dictionary:
 			_expect_int(node["floor"], "%s.floor" % path, problems)
 		if node.has("tags"):
 			_check_string_array(node["tags"], "%s.tags" % path, problems)
+		## Поля презентации — по факту наличия, как у `trace_key`: `pos` НЕобязателен, но
+		## если он есть, то обе оси обязательны и целые; `name_key` — ключ подписи, и его
+		## тип проверяется тем же способом, что у остальных текстовых ключей.
+		if node.has("pos"):
+			_check_pos(node["pos"], "%s.pos" % path, problems)
+		_check_text_key(node, "name_key", path, problems)
 		nodes[String(node_id)] = node
 	return nodes
+
+
+## Координаты помещения на схеме этажа: `{"x": <целое>, "y": <целое>}`.
+##
+## Проверка идёт по ФАКТУ поля (как у `trace_key`), и внутри — по обеим осям сразу:
+## `{"x": 5}` без `y` — это не «координата наполовину», а неполная форма, и назвать её
+## обязан `MISSING_FIELD` на своей оси. Отрицательные значения законны: схема этажа
+## может быть разложена и в отрицательную сторону, поэтому `BAD_VALUE` здесь не бывает.
+static func _check_pos(raw, path: String, problems: Array) -> void:
+	if typeof(raw) != TYPE_DICTIONARY:
+		problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(raw)))
+		return
+	var pos: Dictionary = raw
+	_check_keys(pos, POS_KEYS, path, problems)
+	for axis in ["x", "y"]:
+		var axis_path := "%s.%s" % [path, axis]
+		if not pos.has(axis):
+			problems.append(Problems.missing_field(axis_path, TYPE_INT))
+			continue
+		_int_or(pos[axis], axis_path, problems)
+
+
+## `floors` — НЕобязательный корневой раздел: словарь «номер этажа → запись с подписью»
+## (`{"-1": {"name_key": "floor.-1"}, ...}`). Ключ — номер этажа СТРОКОЙ: в JSON ключи
+## объектов строковые, и `-1` для подвала допустим.
+##
+## Это словарь, а не седьмой раздел-массив: `ARRAY_SECTIONS` перечисляет корневые
+## МАССИВЫ файла, и попадание `floors` туда сделало бы раздел обязательным — уровень без
+## координат перестал бы грузиться. Отсутствие `floors` не даёт ни одной проблемы;
+## `floors: []` (массив вместо словаря) — `WRONG_TYPE` на своём пути.
+##
+## Сверка номеров этажей с `nodes[].floor` здесь НЕ ведётся: `floors` — подписи для
+## показа, и запись этажа, на котором помещений нет, дефектом не является (решение
+## названо в отчёте задачи 10).
+static func _check_floors(data: Dictionary, problems: Array) -> void:
+	if not data.has("floors"):
+		return
+	var raw = data["floors"]
+	if typeof(raw) != TYPE_DICTIONARY:
+		problems.append(Problems.wrong_type("floors", TYPE_DICTIONARY, typeof(raw)))
+		return
+	var floors: Dictionary = raw
+	for key in floors:
+		var path := "floors.%s" % String(key)
+		var entry = floors[key]
+		if typeof(entry) != TYPE_DICTIONARY:
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(entry)))
+			continue
+		_check_keys(entry, FLOOR_KEYS, path, problems)
+		if not entry.has("name_key"):
+			problems.append(Problems.missing_field("%s.name_key" % path, TYPE_STRING))
+		else:
+			_string_or(entry["name_key"], "%s.name_key" % path, problems)
 
 
 static func _check_edges(data: Dictionary, nodes: Dictionary, problems: Array) -> void:

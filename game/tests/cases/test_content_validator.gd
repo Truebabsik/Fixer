@@ -103,6 +103,40 @@ func _texts_for(m: Dictionary) -> Dictionary:
 	return out
 
 
+## Корректная миссия С полями презентации: координаты помещений, подписи (`name_key`),
+## название комплекса и этажи. Отдельная фикстура, а не правка `_good()`: обратная
+## совместимость формы — часть требования, и держится она тем, что `_good()` этих полей
+## НЕ имеет (кейс 15а). Здесь же проверяются обе половины формы: `pos` с отрицательной
+## координатой (схема этажа вправе уходить в минус) и этаж с номером `-1` строкой.
+func _good_presented() -> Dictionary:
+	var m := _good()
+	m["facility_key"] = "facility.meridian"
+	m["nodes"]["entry"]["pos"] = {"x": 0, "y": 0}
+	m["nodes"]["entry"]["name_key"] = "room.entry"
+	m["nodes"]["hall"]["pos"] = {"x": 4, "y": 0}
+	m["nodes"]["hall"]["name_key"] = "room.hall"
+	m["nodes"]["vault"]["pos"] = {"x": 8, "y": -4}
+	m["nodes"]["vault"]["name_key"] = "room.vault"
+	m["floors"] = {
+		"-1": {"name_key": "floor.-1"},
+		"1": {"name_key": "floor.1"},
+	}
+	return m
+
+
+## Тексты к полям презентации. Список рукописный и НЕ выводится из данных: вывести его
+## значит повторить данные и не поймать ни пропавший ключ, ни лишний.
+func _presentation_texts() -> Dictionary:
+	var out := _texts_for(_good())
+	out["room.entry"] = "ВХОД"
+	out["room.hall"] = "ХОЛЛ"
+	out["room.vault"] = "ХРАНИЛИЩЕ"
+	out["floor.-1"] = "ПОДВАЛ // ХОЛОДНЫЙ АРХИВ"
+	out["floor.1"] = "ЭТАЖ 1 // ПРИЁМНАЯ"
+	out["facility.meridian"] = "МЕРИДИАН // АРХИВНЫЙ КОМПЛЕКС"
+	return out
+
+
 func _codes(problems: Array) -> Array:
 	var out: Array = []
 	for p in problems:
@@ -1348,5 +1382,162 @@ func run() -> Array:
 			_problems_naming(gapped_problems, key).size(), 1)
 		t.eq("снят обязательный ключ «%s» — и он единственный" % key,
 			gapped_problems.size(), 1)
+
+	# 15. ФОРМА ПРЕЗЕНТАЦИИ: координаты помещений, подписи, название комплекса и этажи
+	# (`design-presentation-data.md` §2 и §8; `levels/mission-01.md` §3–4). Поля
+	# НЕобязательные, и это проверяется с обеих сторон: миссия БЕЗ них обязана оставаться
+	# валидной и грузиться (15а), миссия С ними — тоже (15б), а каждый вид поломки
+	# обязан называться своим диагнозом на своём пути (15в–15к).
+	#
+	# Что краснит каждая проба (имена ассертов — в отчёте задачи 10): «сделать `floors`
+	# обязательным» — 15а; «убрать `pos`/`name_key` из `NODE_KEYS`» — 15б; «не проверять
+	# тип `name_key`/`facility_key`/`floors[].name_key`» — 15в: ключ молча выпадает из
+	# сбора текстов (`_walk_text_keys` берёт только строки), и его текст объявляется висячим.
+
+	# 15а. Обратная совместимость формы: у `_good()` нет ни `pos`, ни `name_key`, ни
+	# `floors`, ни `facility_key` — и это полноценная миссия, а не «неполная».
+	t.is_true("миссия без pos/name_key/floors/facility_key валидна",
+		Validator.validate(_good(), _texts_for(_good())).is_empty())
+
+	# 15б. Миссия С полями презентации проходит целиком, вместе со сверкой текстов, —
+	# и поля эти ИЗВЕСТНЫ схеме (`UNKNOWN_KEY` не выдаётся). Второй ассерт не следует из
+	# первого: положительный верен и тогда, когда `UNKNOWN_KEY` не выдаётся вовсе.
+	var shown := _good_presented()
+	t.is_true("миссия с pos/name_key/floors/facility_key валидна",
+		Validator.validate(shown, _presentation_texts()).is_empty())
+	t.is_false("pos/name_key/floors/facility_key — известные схеме поля (нет UNKNOWN_KEY)",
+		Problems.has(Validator.validate(shown, _presentation_texts()), Problems.UNKNOWN_KEY))
+
+	# Отрицательные координаты — законная форма схемы этажа, а не `BAD_VALUE`.
+	var negative := _good_presented()
+	negative["nodes"]["vault"]["pos"] = {"x": -4, "y": -8}
+	t.is_true("отрицательные координаты допустимы",
+		Validator.validate(negative, _presentation_texts()).is_empty())
+
+	# 15в. Ключи презентации УЧАСТВУЮТ в сверке текстов — обходом `*_key`, а не отдельной
+	# проверкой: снятый текст обязан назваться `MISSING_TEXT` на СВОЁМ пути. Путь сверяется
+	# целиком, а не «где-то есть проблема»: иначе ассерт проходил бы на чужом диагнозе.
+	for pair in [["room.hall", "nodes.hall.name_key"],
+			["floor.1", "floors.1.name_key"],
+			["facility.meridian", "facility_key"]]:
+		var gapped := _presentation_texts()
+		gapped.erase(String(pair[0]))
+		t.eq("нет текста «%s» — MISSING_TEXT на пути %s" % [String(pair[0]), String(pair[1])],
+			_codes_at(Validator.validate(shown, gapped), String(pair[1])), [Problems.MISSING_TEXT])
+
+	# 15г. Обратное направление: ключ семейств `room.`/`floor.`/`facility.` без данных —
+	# висячий. `UNUSED_OK_PREFIXES` для них НЕ расширен намеренно: эти ключи выводятся из
+	# данных и обязаны быть к ним привязаны, иначе подпись на схеме никем не проверена.
+	for extra_key in ["room.нет_такого", "floor.9", "facility.другой"]:
+		var extra := _presentation_texts()
+		extra[extra_key] = "ЛИШНЕЕ"
+		t.eq("лишний ключ «%s» — DANGLING_TEXT" % extra_key,
+			_codes_at(Validator.validate(shown, extra), "texts.%s" % extra_key),
+			[Problems.DANGLING_TEXT])
+
+	# 15д. `pos`: не словарь — `WRONG_TYPE` на самом поле; неполная и нецелая форма —
+	# диагноз на СВОЕЙ оси. Строка вместо числа — ровно та описка, ради которой тип
+	# проверяется по факту поля, а не подразумевается.
+	## Классы не-словарей проверяются ВСЕ: массив и строка — разные значения, и «массив
+	## прошёл» не доказывает, что не-словарь ловится вообще.
+	for bad_pos in [[4, 0], "4,0"]:
+		var pos_not_dict := _good_presented()
+		pos_not_dict["nodes"]["hall"]["pos"] = bad_pos
+		t.eq("pos %s — WRONG_TYPE на поле" % str(bad_pos),
+			_codes_at(Validator.validate(pos_not_dict, _presentation_texts()), "nodes.hall.pos"),
+			[Problems.WRONG_TYPE])
+
+	var pos_string_x := _good_presented()
+	pos_string_x["nodes"]["hall"]["pos"] = {"x": "5", "y": 0}
+	t.eq("pos.x строкой — WRONG_TYPE на оси",
+		_codes_at(Validator.validate(pos_string_x, _presentation_texts()), "nodes.hall.pos.x"),
+		[Problems.WRONG_TYPE])
+
+	var pos_no_y := _good_presented()
+	pos_no_y["nodes"]["hall"]["pos"] = {"x": 4}
+	t.eq("pos без y — MISSING_FIELD на оси",
+		_codes_at(Validator.validate(pos_no_y, _presentation_texts()), "nodes.hall.pos.y"),
+		[Problems.MISSING_FIELD])
+
+	var pos_half := _good_presented()
+	pos_half["nodes"]["hall"]["pos"] = {"x": 4, "y": 1.5}
+	t.eq("pos.y дробный — WRONG_TYPE на оси",
+		_codes_at(Validator.validate(pos_half, _presentation_texts()), "nodes.hall.pos.y"),
+		[Problems.WRONG_TYPE])
+
+	# Список полей координаты закрыт: чужая ось — не «координата без оси», а неизвестное поле.
+	var pos_unknown_axis := _good_presented()
+	pos_unknown_axis["nodes"]["hall"]["pos"] = {"x": 4, "y": 0, "z": 1}
+	t.eq("ось z в pos — UNKNOWN_KEY на поле координаты",
+		_codes_at(Validator.validate(pos_unknown_axis, _presentation_texts()), "nodes.hall.pos.z"),
+		[Problems.UNKNOWN_KEY])
+
+	# 15е. `name_key` помещения числом — `WRONG_TYPE` на своём пути, и кейс обязан дожить до
+	# своих ассертов (урок F1 ревью 2): ни `String(...)` на сломанном поле, ни `problems[0]`
+	# здесь нет — путь и код читаются с охраной (`_codes_at`, размер до индексации).
+	# Второе следствие то же и по той же причине, что у `trace_key`: ключ не собрался —
+	# текст остался без ссылки.
+	var bad_name := _good_presented()
+	bad_name["nodes"]["hall"]["name_key"] = 5
+	var bad_name_problems := Validator.validate(bad_name, _presentation_texts())
+	t.eq("name_key числом — WRONG_TYPE на своём пути",
+		_codes_at(bad_name_problems, "nodes.hall.name_key"), [Problems.WRONG_TYPE])
+	t.eq("name_key числом — текст «room.hall» остался висячим",
+		_codes_at(bad_name_problems, "texts.room.hall"), [Problems.DANGLING_TEXT])
+	t.eq("name_key числом — диагнозов ровно два, третьего нет",
+		bad_name_problems.size(), 2)
+
+	# 15ж. Корневой `facility_key` числом — `WRONG_TYPE` на корне, и текст остаётся висячим.
+	var bad_facility := _good_presented()
+	bad_facility["facility_key"] = 5
+	var bad_facility_problems := Validator.validate(bad_facility, _presentation_texts())
+	t.eq("facility_key числом — WRONG_TYPE на поле",
+		_codes_at(bad_facility_problems, "facility_key"), [Problems.WRONG_TYPE])
+	t.eq("facility_key числом — текст «facility.meridian» висячий",
+		_codes_at(bad_facility_problems, "texts.facility.meridian"), [Problems.DANGLING_TEXT])
+
+	# 15з. `floors` — СЛОВАРЬ, а не седьмой раздел-массив. Массив вместо словаря назван
+	# `WRONG_TYPE` на своём пути; заодно видно, что `floors` НЕ попал в `ARRAY_SECTIONS`:
+	# попади он туда, `[]` был бы законным «этажей нет» и прошёл бы молча.
+	for bad_floors in [[], "этажи", 7]:
+		var floors_not_dict := _good_presented()
+		floors_not_dict["floors"] = bad_floors
+		t.eq("floors = %s — WRONG_TYPE на своём пути" % str(bad_floors),
+			_codes_at(Validator.validate(floors_not_dict, _presentation_texts()), "floors"),
+			[Problems.WRONG_TYPE])
+
+	# 15и. Запись этажа: не словарь — `WRONG_TYPE`; без `name_key` — `MISSING_FIELD`;
+	# `name_key` не строкой — `WRONG_TYPE`. Три разных дефекта, три разных диагноза.
+	var floor_not_dict := _good_presented()
+	floor_not_dict["floors"]["1"] = "ЭТАЖ 1"
+	t.eq("запись этажа строкой — WRONG_TYPE на записи",
+		_codes_at(Validator.validate(floor_not_dict, _presentation_texts()), "floors.1"),
+		[Problems.WRONG_TYPE])
+	## Каскад тот же, что у `name_key`: ключ не собрался — его текст остался без ссылки.
+	## Диагнозов ровно два, и оба названы; третьего на одну ошибку не выписано.
+	t.eq("запись этажа строкой — диагнозов ровно два",
+		Validator.validate(floor_not_dict, _presentation_texts()).size(), 2)
+
+	var floor_no_name := _good_presented()
+	floor_no_name["floors"]["1"] = {}
+	t.eq("запись этажа без name_key — MISSING_FIELD",
+		_codes_at(Validator.validate(floor_no_name, _presentation_texts()), "floors.1.name_key"),
+		[Problems.MISSING_FIELD])
+
+	var floor_bad_name := _good_presented()
+	floor_bad_name["floors"]["1"]["name_key"] = 5
+	t.eq("floors[].name_key числом — WRONG_TYPE",
+		_codes_at(Validator.validate(floor_bad_name, _presentation_texts()), "floors.1.name_key"),
+		[Problems.WRONG_TYPE])
+
+	# 15к. Этаж, на котором помещений нет, дефектом НЕ является: `floors` — подписи для
+	# показа, и сверки номеров с `nodes[].floor` у валидатора нет (решение названо в отчёте
+	# задачи 10). Ассерт держит это решение от молчаливого расширения правила.
+	var extra_floor := _good_presented()
+	extra_floor["floors"]["9"] = {"name_key": "floor.9"}
+	var extra_floor_texts := _presentation_texts()
+	extra_floor_texts["floor.9"] = "ЭТАЖ 9 // ЧЕРДАК"
+	t.is_true("этаж без помещений не диагноз",
+		Validator.validate(extra_floor, extra_floor_texts).is_empty())
 
 	return t.results
