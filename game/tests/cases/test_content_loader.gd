@@ -9,6 +9,9 @@ extends RefCounted
 const Assert := preload("res://tests/assert.gd")
 const Problems := preload("res://content/problems.gd")
 const Loader := preload("res://content/loader.gd")
+## Нужен ради `REQUIRED_TEXT_KEYS`: фикстура текстов обязана нести системные ключи
+## (см. `_texts_for`), а эталон их перечня живёт в кейсе валидатора.
+const Validator := preload("res://content/validator.gd")
 const Fixture := preload("res://tests/fixtures/small_mission.gd")
 ## Нужен ровно для одного ассерта: состав по умолчанию сверяется с умолчанием `Plan`,
 ## чтобы «два бойца» не оказались числом, вписанным в кейс.
@@ -52,9 +55,18 @@ func _fixture_data() -> Dictionary:
 
 ## Ключи текстов, которые требует фикстура: собираются из самого словаря обходом
 ## полей `*_key`. Так набор не разойдётся с фикстурой, если она получит новое окно.
+##
+## Плюс обязательные системные ключи (`Validator.REQUIRED_TEXT_KEYS`): сверка текстов,
+## включённая словарём, требует и их, а фикстура изображает ТЕКСТЫ СДАЧИ. Без них
+## «словарь загружен без проблем» краснело бы на ключах, которых фикстура и не должна
+## выводить из данных: у `log.silence` поля в данных нет вовсе. Независимый эталон этих
+## ключей живёт в `test_content_validator.gd` (§14) и там же доказано, что список
+## валидатора не короче эталона; здесь он намеренно не дублируется.
 func _texts_for(value) -> Dictionary:
 	var out: Dictionary = {}
 	_collect_keys(value, out)
+	for key in Validator.REQUIRED_TEXT_KEYS:
+		out[String(key)] = "ТЕКСТ"
 	return out
 
 
@@ -107,6 +119,13 @@ func run() -> Array:
 	var res := Loader.load_mission(fixture_data, _texts_for(fixture_data))
 	t.is_true("словарь загружен без проблем", (res["problems"] as Array).is_empty())
 	t.is_true("миссия собрана", res["mission"] != null)
+	## Ранний выход ПОСЛЕ ассертов, но ДО первых обращений к модели: без него провал
+	## валидатора (например, фикстура текстов разошлась с обязательными системными
+	## ключами) ронял кейс рантаймом на `loaded.id`, и раннер печатал `LOAD FAIL` —
+	## красное БЕЗ имени сломанного правила, потому что `run()` не возвращал и уже
+	## собранных ассертов. С выходом провал называет ассерт, а не «кейс пуст».
+	if res["mission"] == null:
+		return t.results
 
 	# 2. ЭКВИВАЛЕНТНОСТЬ: словарь даёт ровно ту же модель, что и код. Сравниваются и
 	# размеры, и МНОЖЕСТВА ключей: «все эталонные узлы на месте» не запрещает лишний.
@@ -159,12 +178,17 @@ func run() -> Array:
 	# (`null` — «сверку не делаю», словарь — «сверяю»). Строка несёт `title_key`, поэтому
 	# словарь передаётся настоящий, а не пустой: пустой означал бы «текстов нет» и дал бы
 	# MISSING_TEXT — то есть проверялся бы не разбор JSON, а отсутствие текстов.
+	# Ключ данных здесь один, а обязательные системные ключи добавляются те же, что и в
+	# `_texts_for`: словарь из одной строки «текстов нет» не изображает.
 	var json_text := '{"id":"j","title_key":"mission.j.title",' \
 		+ '"nodes":{"a":{"floor":1,"tags":["entry"]},"b":{"floor":1,"tags":[]}},' \
 		+ '"edges":[{"id":"e_ab","a":"a","b":"b","kind":"corridor","steps":1,"noise":0}],' \
 		+ '"patrols":[],"sensors":[],"objective":"b",' \
 		+ '"windows":[],"intel":[],"access_points":[]}'
-	var parsed := Loader.load_text(json_text, {"mission.j.title": "Операция «J»"})
+	var json_texts := {"mission.j.title": "Операция «J»"}
+	for key in Validator.REQUIRED_TEXT_KEYS:
+		json_texts[String(key)] = "ТЕКСТ"
+	var parsed := Loader.load_text(json_text, json_texts)
 	t.is_true("строка JSON разобрана", (parsed["problems"] as Array).is_empty())
 	t.eq("из строки собрана цель", parsed["mission"].objective, "b")
 

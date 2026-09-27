@@ -40,6 +40,9 @@ const Fixture := preload("res://tests/fixtures/small_mission.gd")
 const Mission := preload("res://sim/mission.gd")
 const Plan := preload("res://sim/plan.gd")
 const Harness := preload("res://sim/harness.gd")
+## Нужен ради `REQUIRED_TEXT_KEYS`: сверка текстов-словарём требует и обязательные
+## системные ключи (см. `_canonical_texts`), а их перечень живёт у валидатора.
+const Validator := preload("res://content/validator.gd")
 
 ## Метка отсутствующего поля в парах «путь=значение»: пропажа поля обязана быть ВИДНА
 ## сравнению (и названа провалом), а не ронять кейс рантаймом.
@@ -135,9 +138,17 @@ func _canonical() -> Dictionary:
 ## канона, и провал случался бы на `MISSING_TEXT` — то есть на текстах, а не на том,
 ## что забыли. Здесь же проверяется ровно то, что заявлено: тексты есть под все ключи,
 ## и лишних ключей нет (висячий ключ даёт `DANGLING_TEXT` и красный прогон).
+##
+## Плюс обязательные системные ключи (`Validator.REQUIRED_TEXT_KEYS`): канон описывает
+## миссию, а сверка текстов-словарём требует и тексты СИСТЕМЫ (04-texts.md §4), которых
+## в данных канона нет вовсе. Независимый эталон этих ключей — в `test_content_validator.gd`
+## (§14), здесь он намеренно не дублируется: тут проверяется, что все три пути к модели
+## проходят с ПОЛНЫМ набором текстов.
 func _canonical_texts(data) -> Dictionary:
 	var out: Dictionary = {}
 	_collect_keys(data, out)
+	for key in Validator.REQUIRED_TEXT_KEYS:
+		out[String(key)] = "ТЕКСТ"
 	return out
 
 

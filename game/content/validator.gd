@@ -14,6 +14,12 @@ const Problems := preload("res://content/problems.gd")
 ## Виды рёбер живут в `sim/mission.gd`: валидатор их не дублирует, а спрашивает,
 ## чтобы список не разошёлся с ядром (соглашение §6.1: только const preload).
 const Mission := preload("res://sim/mission.gd")
+## Виды рёбер, перекрываемых тревогой, живут в `sim/response.gd` — по той же причине,
+## что и `Mission` выше: валидатор их не перечисляет, а спрашивает ядро
+## (`Response.blockable_kind`). Второй список здесь разошёлся бы с ядром молча, и окно
+## у ребра, которое закрывает тревога, получало бы `WINDOW_ON_OPEN_EDGE` — диагноз
+## «сцены не будет» на сцене, которая есть.
+const Response := preload("res://sim/response.gd")
 
 const ROOT_KEYS := ["id", "title_key", "nodes", "edges", "patrols", "sensors",
 	"objective", "windows", "intel", "access_points", "note"]
@@ -24,13 +30,16 @@ const SENSOR_KEYS := ["id", "nodes", "note"]
 const WINDOW_KEYS := ["id", "kind", "trigger", "text_key", "options", "silence", "note"]
 const OPTION_KEYS := ["id", "text_key", "complexity", "cost", "effects", "note"]
 const COST_KEYS := ["noise", "delay", "note"]
-const SILENCE_KEYS := ["text_key", "good", "neutral", "bad", "safe", "note"]
+## Разрешённые поля `silence` списком здесь НЕ стоят: их собирает `_silence_keys()`
+## из `SILENCE_QUALITIES`. Ключи качеств (`good_key`, …) обязаны появляться вместе с
+## новым качеством, и второй список тех же имён разошёлся бы с первым молча — тем
+## самым дефектом, против которого стоят `TRIGGER_TYPES`/`WINDOW_KINDS`.
 const TRIGGER_KEYS := ["type", "edge", "node", "sensor", "note"]
 const EFFECT_KEYS := ["type", "edge", "value", "id", "want", "needs", "fallback", "note"]
 const INTEL_KEYS := ["channel", "observed_at", "entries", "note"]
 const INTEL_ENTRY_KEYS := ["kind", "id", "route", "period", "nodes", "node", "count",
 	"age_hours", "false", "note_key", "note"]
-const POINT_KEYS := ["id", "node", "kind", "text_key", "actions", "note"]
+const POINT_KEYS := ["id", "node", "kind", "text_key", "trace_key", "actions", "note"]
 const ACTION_KEYS := ["id", "text_key", "complexity", "cost", "effects", "note"]
 
 ## Разделы-массивы: обязательны на корне (см. 02-format.md §1), но пустой массив —
@@ -59,17 +68,51 @@ const SILENCE_QUALITIES := ["good", "neutral", "bad", "safe"]
 ## Свои агенты заняты движком: под этими id в patrols нельзя.
 const RESERVED_AGENT_IDS := ["kira", "echo"]
 
-## Ключи вне данных, которые обязаны существовать всегда (см. 04-texts.md §4
-## постановки). Они не считаются висячими, даже если ни одно окно на них не ссылается.
-## `intel.` здесь потому, что пояснения к разведке адресуются по каналу и пометке
-## (`intel.hack.patrol_false`, 02-format.md §5), а не по id конкретного пункта: собрать
-## такие ключи из данных нельзя, и без префикса они получали ложный DANGLING_TEXT.
+## ОБЯЗАТЕЛЬНЫЕ текстовые ключи: тексты СИСТЕМЫ, а не окна (04-texts.md §4 плюс блоки
+## §3.1–3.2). У `mission.01.title`, `log.silence`, `outcome.caught` или `results.summary`
+## нет поля в данных миссии, на которое указывал бы `*_key`, поэтому обычная сверка
+## (`_walk_text_keys` → `_check_texts`) их не видит вовсе: поставка без них оставалась бы
+## «чистой», а игра — без названия уровня, без строки «КОМАНДУЕТ» и без итогов.
 ##
-## ГРАНИЦА, названная прямо: валидатор проверяет только то, что ключи ИЗ ДАННЫХ есть
-## в текстах, и что чужих ключей нет. Присутствие обязательных текстовых ГРУПП
-## (`log.*`, `voice.*`, `final.*`, `outcome.*`, `results.*`) он НЕ проверяет: текстов
-## пока ноль, и такая проверка давала бы только ложные срабатывания. Это осознанное
-## решение, а не забытая проверка.
+## Перечень взят из постановки дословно и НЕ расширяется: `04-texts.md` §3.3–3.7 оставляет
+## окна, голоса и финальные раскрытия автору уровня, и требовать их здесь значило бы
+## зашить одну миссию в конвейер. `team.market.intro` стоит рядом с блоком §4 потому, что
+## он того же класса: биржа команды (§3.2) — экран системы, а не окно миссии.
+##
+## Проверка идёт ТОЛЬКО при переданных текстах-словаре: `null` — осознанный отказ от сверки
+## (контракт `validate`), пустой словарь — «текстов нет», и тогда отсутствуют все
+## обязательные ключи тоже.
+const REQUIRED_TEXT_KEYS := [
+	"mission.01.title",
+	"negotiation.intro", "negotiation.term.money", "negotiation.term.time",
+	"negotiation.term.truth", "negotiation.mediator.recognize",
+	"negotiation.mediator.answer.press", "negotiation.mediator.answer.yield",
+	"negotiation.dossier.offer", "negotiation.dossier.read", "negotiation.deal",
+	"team.kira.available", "team.echo.available", "team.market.intro",
+	"log.silence", "log.command.kira", "log.command.echo", "log.command.you",
+	"log.radio.jammed", "log.radio.intercepted", "log.alarm.raised", "log.ghost.mismatch",
+	"voice.kira.ack", "voice.kira.command", "voice.echo.joke",
+	"final.read", "final.hand_over", "final.destroy",
+	"outcome.extracted", "outcome.caught", "outcome.timeout",
+	"results.summary",
+]
+
+## Ключи вне данных, которых валидатор НЕ требует, но и не считает висячими, даже если ни
+## одно окно на них не ссылается. `intel.` здесь потому, что пояснения к разведке
+## адресуются по каналу и пометке (`intel.hack.patrol_false`, 02-format.md §5), а не по id
+## конкретного пункта: собрать такие ключи из данных нельзя, и без префикса они получали
+## ложный DANGLING_TEXT.
+##
+## Это список ТЕРПИМОГО, а не проверяемого: он отвечает на вопрос «висячий ли ключ», и
+## наличие ключа под этими префиксами никто не обещает. Обязательность несут ровно
+## `REQUIRED_TEXT_KEYS` выше — там же сказано, почему.
+##
+## Прежний долг, записанный здесь («обязательные группы `log.*`, `voice.*`, `final.*`,
+## `outcome.*`, `results.*` не проверяются: текстов ноль, и такая проверка давала бы только
+## ложные срабатывания»), ЗАКРЫТ: тексты поставки есть (167 ключей, все 32 обязательных на
+## месте), и пропажа обязательного ключа — реальный дефект контента, который обязан
+## называться. Проверка живёт в `_check_required_texts`, код проблемы —
+## `MISSING_REQUIRED_TEXT`.
 const UNUSED_OK_PREFIXES := ["mission.", "negotiation.", "team.", "log.", "voice.",
 	"final.", "outcome.", "results.", "intel."]
 
@@ -86,7 +129,8 @@ const UNUSED_OK_PREFIXES := ["mission.", "negotiation.", "team.", "log.", "voice
 ##                          написанный в коде (не «забыл», а «здесь тексты не про это»);
 ##   `texts` — словарь    — сверка выполняется. Пустой словарь тоже: «текстов нет» —
 ##                          осмысленное утверждение, и тогда отсутствующими окажутся
-##                          ВСЕ ключи, на которые ссылаются данные;
+##                          ВСЕ ключи, на которые ссылаются данные, и все обязательные
+##                          системные ключи (`REQUIRED_TEXT_KEYS`);
 ##   иное                 — ТРЕТЬЕ состояние: строка, число, логическое, массив и любой
 ##                          другой не-словарь. Сверку вести нечем, и это ОШИБКА вызова,
 ##                          а не «текстов нет»: она называется `WRONG_TYPE` с путём
@@ -187,21 +231,28 @@ static func _known_ids(data: Dictionary, section: String) -> Dictionary:
 	return out
 
 
-## id ребра → ЗНАЧЕНИЕ поля `locked` КАК ЕСТЬ. Не приведённое к `bool` и не `true`.
+## id ребра → сведения о ребре, нужные проверкам окон: `locked` КАК ЕСТЬ и `kind`
+## строкой. Не приведённый к `bool` `locked` и не `true`.
 ##
-## Проверкам окон нужны ТРИ ответа про одно и то же ребро: существует ли ссылка (`has`),
-## заперто ли оно (`true`) и «поле испорчено — судить нельзя» (не-bool). Приведение здесь
-## и было бы дефектом: `bool("да")` — не существующий конструктор (рантайм-сбой движка),
-## `bool(1)` — тихая истина, то есть мусор превращался бы в уверенное «заперто».
-## Для ссылочных проверок (`_check_ref_key`, `_check_effects`) словарь ведёт себя как прежний:
-## ключи — существующие id.
+## Проверкам окон нужны ЧЕТЫРЕ ответа про одно и то же ребро: существует ли ссылка (`has`),
+## заперто ли оно (`true`), «поле испорчено — судить нельзя» (не-bool) и «перекрывается
+## ли оно тревогой» (`kind`). Приведение `locked` здесь и было бы дефектом: `bool("да")` —
+## не существующий конструктор (рантайм-сбой движка), `bool(1)` — тихая истина, то есть
+## мусор превращался бы в уверенное «заперто». `kind` берётся через `str`, а не `String`:
+## значение приходит из данных и может быть словарём, а конструктор `String` на нём падает
+## рантаймом.
+## Для ссылочных проверок (`_check_ref_key`, `_check_effects`) словарь ведёт себя как
+## прежний: ключи — существующие id.
 static func _known_edges(data: Dictionary) -> Dictionary:
 	var out := {}
 	if not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
 		return out
 	for e in (data["edges"] as Array):
 		if typeof(e) == TYPE_DICTIONARY and e.has("id"):
-			out[String(e["id"])] = e.get("locked", false)
+			out[String(e["id"])] = {
+				"locked": e.get("locked", false),
+				"kind": str(e.get("kind", "")),
+			}
 	return out
 
 
@@ -505,6 +556,7 @@ static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sens
 		_check_keys(w, WINDOW_KEYS, path, problems)
 		if not w.has("text_key"):
 			problems.append(Problems.missing_field("%s.text_key" % path, TYPE_STRING))
+		_check_text_key(w, "text_key", path, problems)
 		var kind := ""
 		if not w.has("kind"):
 			problems.append(Problems.missing_field("%s.kind" % path, TYPE_STRING))
@@ -606,6 +658,7 @@ static func _check_options(w: Dictionary, wid: String, known_edges: Dictionary, 
 			if not o.has(String(required[0])):
 				problems.append(Problems.missing_field("%s.%s" % [path, String(required[0])],
 					required[1]))
+		_check_text_key(o, "text_key", path, problems)
 		var oid := _string_or(o.get("id", ""), "%s.id" % path, problems)
 		if oid == "silence":
 			problems.append(Problems.silence_as_option(wid))
@@ -673,6 +726,23 @@ static func _option_signature(o: Dictionary, cost_ok: bool) -> String:
 	return "|".join(parts)
 
 
+## Разрешённые поля `silence` (02-format.md §4.5 плюс ключи качеств): базовый ключ
+## текста, ключ качества на каждый исход, сами эффекты исхода, заметка.
+##
+## Ключи качеств (`good_key`, …) — НЕобязательные поля: без них читается базовый
+## `text_key` (`sim/window.gd:silence_key_for`), поэтому они проверяются по типу, а
+## не на присутствие. Собираются они здесь, а не переписываются константой рядом:
+## третье качество, добавленное в `SILENCE_QUALITIES`, обязано приехать и сюда.
+static func _silence_keys() -> Array:
+	var out: Array = ["text_key"]
+	for quality in SILENCE_QUALITIES:
+		out.append("%s_key" % quality)
+	for quality in SILENCE_QUALITIES:
+		out.append(quality)
+	out.append("note")
+	return out
+
+
 static func _check_silence(w: Dictionary, wid: String, trigger_type: String, trigger_edge: String,
 		known_edges: Dictionary, problems: Array) -> void:
 	var path := "windows.%s.silence" % wid
@@ -683,9 +753,12 @@ static func _check_silence(w: Dictionary, wid: String, trigger_type: String, tri
 	if typeof(silence) != TYPE_DICTIONARY:
 		problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(silence)))
 		return
-	_check_keys(silence, SILENCE_KEYS, path, problems)
+	_check_keys(silence, _silence_keys(), path, problems)
 	if not silence.has("text_key"):
 		problems.append(Problems.missing_field("%s.text_key" % path, TYPE_STRING))
+	_check_text_key(silence, "text_key", path, problems)
+	for quality in SILENCE_QUALITIES:
+		_check_text_key(silence, "%s_key" % quality, path, problems)
 	var complete := true
 	for quality in SILENCE_QUALITIES:
 		if not silence.has(quality):
@@ -736,17 +809,35 @@ static func _check_silence(w: Dictionary, wid: String, trigger_type: String, tri
 	##  * ребра нет (`BAD_REF` уже сказан) — судить не о чем, второго следствия не будет;
 	##  * `locked` не bool (`WRONG_TYPE` уже сказан в `_check_edges`) — о запертости судить
 	##    не по чему, и второго следствия одному дефекту не выписываем;
-	##  * ребро не заперто — окно не сработает ни разу, и это отдельный диагноз
+	##  * ребро не запираемо — окно не сработает ни разу, и это отдельный диагноз
 	##    (`WINDOW_ON_OPEN_EDGE`), а не невыполнимость;
 	##  * форма молчания неполна или неверна — корень назван (`MISSING_SILENCE`,
 	##    `WRONG_TYPE`), и о выполнимости судить рано.
+	##
+	## «ЗАПИРАЕМО» = заперто замком ИЛИ перекрывается тревогой (`_blocked_by_alarm`).
+	## Окно ★27 поставки висит на ребре `e_freight_4_0` (`lift_freight`), которое закрывает
+	## тревога, а не замок: сцена у такого ребра срабатывает так же, как у двери, и ядро
+	## снимает обе блокировки одним `unlock` (`sim.gd:_is_blocked_for`).
 	if trigger_type == "locked_edge" and known_edges.has(trigger_edge):
-		var locked = known_edges[trigger_edge]
+		var edge: Dictionary = known_edges[trigger_edge]
+		var locked = edge["locked"]
 		if typeof(locked) == TYPE_BOOL:
-			if not bool(locked):
+			if not bool(locked) and not _blocked_by_alarm(edge):
 				problems.append(Problems.window_on_open_edge(wid, trigger_edge))
 			elif form_ok and not unlocks_edge:
 				problems.append(Problems.unwinnable_edge(wid, trigger_edge))
+
+
+## Перекрывается ли ребро тревогой по своему ВИДУ. Список видов — в ядре
+## (`sim/response.gd:BLOCKED_KINDS`): второй список здесь разошёлся бы с ядром молча —
+## тот же класс дефекта, что `TRIGGER_TYPES`/`WINDOW_KINDS`, только через границу
+## «контент ↔ ядро», и заметить его было бы нечем (валидатор и прогон смотрели бы
+## на разные списки).
+##
+## Вопрос именно «может ли тревога вообще перекрыть этот вид», а не «перекрыто ли оно
+## сейчас»: у валидатора нет и не должно быть состояния прогона — тревоги в файле нет.
+static func _blocked_by_alarm(edge: Dictionary) -> bool:
+	return Response.blockable_kind(String(edge.get("kind", "")))
 
 
 ## Открывает ли эффект `unlock` указанное ребро. Считается и `fallback` предложения
@@ -966,6 +1057,21 @@ static func _check_access_points(data: Dictionary, nodes: Dictionary, known_edge
 		for required in ["id", "node", "kind", "text_key"]:
 			if not ap.has(required):
 				problems.append(Problems.missing_field("%s.%s" % [path, required], TYPE_STRING))
+		_check_text_key(ap, "text_key", path, problems)
+		## `trace_key` — НЕобязательное поле точки доступа (04-texts.md §3.4): ключ текста
+		## подсказки следа. Тип поля проверяется, а не подразумевается: без этой проверки
+		## испорченное поле не названо ничем — сбор текстовых ключей (`_walk_text_keys`)
+		## берёт только строки, и число молча выпадает из сверки.
+		##
+		## Второго диагноза проверка типа НЕ отменяет, и обещать это автору нельзя: число
+		## выпадает из сверки, поэтому текст, на который ссылался сломанный ключ, остаётся
+		## без ссылки и объявляется висячим. На `trace_key: 5` выходят ДВА диагноза —
+		## `WRONG_TYPE` про поле и `DANGLING_TEXT` про его текст. Каскад здесь не гасится:
+		## гашение — отдельное правило «одна ошибка — одно следствие» (шапка файла), и
+		## ради одного поля его не трогают. Оба диагноза закреплены ассертами
+		## (`test_content_validator.gd`, P10).
+		if ap.has("trace_key"):
+			_string_or(ap["trace_key"], "%s.trace_key" % path, problems)
 		var aid := _string_or(ap.get("id", ""), "%s.id" % path, problems)
 		if aid != "":
 			if seen.has(aid):
@@ -1002,6 +1108,7 @@ static func _check_access_points(data: Dictionary, nodes: Dictionary, known_edge
 				if not action.has(String(required[0])):
 					problems.append(Problems.missing_field("%s.%s" % [a_path, String(required[0])],
 						required[1]))
+			_check_text_key(action, "text_key", a_path, problems)
 			var act_id := _string_or(action.get("id", ""), "%s.id" % a_path, problems)
 			if act_id != "":
 				if seen_actions.has(act_id):
@@ -1035,12 +1142,14 @@ static func _check_action_cost(cost, cost_path: String, problems: Array) -> void
 
 # --- тексты -------------------------------------------------------------------
 
-## Собирает все ключи, на которые ссылаются данные, сверяет с текстами и ищет висячие.
+## Собирает все ключи, на которые ссылаются данные, сверяет с текстами, ищет висячие
+## и спрашивает про обязательные системные ключи (`REQUIRED_TEXT_KEYS`).
 ##
-## `texts == null` — сверки нет вовсе: ни `MISSING_TEXT`, ни `DANGLING_TEXT`. Это НЕ
-## «пустые тексты»: пустой словарь — осмысленное «текстов нет», и тогда каждый ключ
-## данных получает `MISSING_TEXT`. Разница между `null` и `{}` видна в каждой строке
-## вызова и покрыта кейсами (`test_content_validator.gd`, кейс 12б; скелет, кейс 2a).
+## `texts == null` — сверки нет вовсе: ни `MISSING_TEXT`, ни `MISSING_REQUIRED_TEXT`,
+## ни `DANGLING_TEXT`. Это НЕ «пустые тексты»: пустой словарь — осмысленное «текстов нет»,
+## и тогда каждый ключ данных получает `MISSING_TEXT` (а обязательные системные —
+## `MISSING_REQUIRED_TEXT`). Разница между `null` и `{}` видна в каждой строке вызова и
+## покрыта кейсами (`test_content_validator.gd`, кейс 12б; скелет, кейс 2a).
 ##
 ## Сюда приходят только `null` или словарь: третье состояние называет `validate`, и до
 ## сверки оно не доходит. Проверка формы аргумента живёт в ОДНОМ месте (`validate`),
@@ -1052,12 +1161,35 @@ static func _check_texts(data: Dictionary, texts, problems: Array) -> void:
 	for entry in used:
 		if not texts.has(String(entry["key"])):
 			problems.append(Problems.missing_text(String(entry["path"]), String(entry["key"])))
+	_check_required_texts(texts, used, problems)
 	for key in texts:
 		if _is_key_used(used, String(key)):
 			continue
 		if _is_unused_ok(String(key)):
 			continue
 		problems.append(Problems.dangling_text(String(key)))
+
+
+## Отсутствие обязательного системного ключа (см. `REQUIRED_TEXT_KEYS`) — третий вопрос
+## сверки текстов, рядом с «ключ данных есть в текстах» и «чужих ключей нет».
+##
+## Ключ, на который ССЫЛАЮТСЯ данные, здесь второй раз НЕ называется: общая сверка уже
+## выписала ему `MISSING_TEXT` на его поле (`title_key` → `mission.01.title`), а «одна
+## ошибка — одно следствие» — правило шапки файла. Поэтому `mission.01.title`, лежащий И в
+## данных, И в обязательном списке, получает РОВНО ОДИН диагноз, и путь у него осмысленный
+## — тот, где ключ и живёт.
+##
+## У системного ключа без поля в данных пути нет вовсе: `MISSING_TEXT` с чужим путём
+## (`windows[3].text_key` у `log.silence`) был бы ложью. Такой ключ называет
+## `MISSING_REQUIRED_TEXT` с путём в пространстве ИМЁН ТЕКСТОВ (`texts.log.silence`) —
+## там же, где живёт `DANGLING_TEXT`.
+static func _check_required_texts(texts: Dictionary, used: Array, problems: Array) -> void:
+	for key in REQUIRED_TEXT_KEYS:
+		if texts.has(key):
+			continue
+		if _is_key_used(used, key):
+			continue
+		problems.append(Problems.missing_required_text(key))
 
 
 static func _collect_text_keys(data: Dictionary) -> Array:
@@ -1134,6 +1266,23 @@ static func _string_or(value, path: String, problems: Array) -> String:
 		problems.append(Problems.wrong_type(path, TYPE_STRING, typeof(value)))
 		return ""
 	return String(value)
+
+
+## Поле, которое является КЛЮЧОМ ТЕКСТА, обязано быть строкой — не только
+## присутствовать. Причина отдельная от общей типизации: без этой проверки
+## испорченное поле молча выпадает из сбора текстовых ключей (`_walk_text_keys`
+## берёт только строки), текст, на который поле ссылалось, остаётся без ссылки и
+## объявляется висячим — и автор получает `DANGLING_TEXT` про текст, которого не
+## терял, не видя, какое поле испорчено.
+##
+## `WRONG_TYPE` при этом ДОБАВЛЯЕТСЯ к тому диагнозу, а не заменяет его: поле
+## действительно оставило свой текст без ссылки, и оба следствия верны. Ровно так
+## ведёт себя `trace_key` (см. `_check_access_points`); каскад здесь не гасится —
+## гашение было бы отдельным правилом «одна ошибка — одно следствие», и оба диагноза
+## закреплены ассертами (`test_content_validator.gd`).
+static func _check_text_key(obj: Dictionary, key: String, path: String, problems: Array) -> void:
+	if obj.has(key):
+		_string_or(obj[key], "%s.%s" % [path, key], problems)
 
 
 static func _check_string_array(value, path: String, problems: Array) -> void:

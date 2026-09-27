@@ -209,10 +209,12 @@ func _advance_own() -> void:
 		var e: Dictionary = mission.edge_between(a.node, target)
 		if e.is_empty():
 			continue
-		if _is_locked(e):
-			continue                  # упёрлись в запертую дверь: её откроет окно
-		if a.progress == 0 and response.edge_blocked(String(e["kind"]), scales.step):
-			_emit("path_blocked", {"agent": a.id, "edge": e["id"], "kind": e["kind"]})
+		if _is_blocked_for(a, e):
+			## О запертой двери скажет окно, а не событие: `path_blocked` — про тревогу
+			## (`architecture.md` §5). Ребро бывает заперто и перекрыто сразу — тогда
+			## причина упора замок, и событие молчит, как молчало прежде.
+			if _alarm_sealed(e) and not _is_locked(e):
+				_emit("path_blocked", {"agent": a.id, "edge": e["id"], "kind": e["kind"]})
 			continue
 		a.progress += 1
 		if a.progress >= int(e["steps"]) + a.speed_penalty():
@@ -341,6 +343,35 @@ func _is_locked(e: Dictionary) -> bool:
 	return not bool(unlocked.get(String(e["id"]), false))
 
 
+## Перекрыто ли ребро тревогой ПРЯМО СЕЙЧАС и не снята ли блокировка. Вид ребра
+## спрашивает ядро (`Response.edge_blocked`), а не второй список здесь.
+##
+## Снятие блокировки — то же, что снятие замка: одна запись в `unlocked` (см. `_unlock`).
+## Прежде `unlocked` читал только `_is_locked`, и тревожную блокировку снять было нечем:
+## группа стояла перед перекрытым ребром до конца миссии.
+func _alarm_sealed(e: Dictionary) -> bool:
+	if bool(unlocked.get(String(e["id"]), false)):
+		return false
+	return response.edge_blocked(String(e["kind"]), scales.step)
+
+
+## Не может ли ЭТОТ агент пройти по ЭТОМУ ребру прямо сейчас. ОДНО понятие на два места:
+## запрет шага (`_advance_own`) и выбор актора окна (`_actor_before_locked_edge`). Прежде
+## актор спрашивал `_is_locked`, и окно у ребра, перекрытого тревогой, не открывалось
+## вовсе: данные окно описывают, а сцены нет.
+##
+## Замок и тревожная блокировка держат по-разному, и это не небрежность:
+##  * замок — при любом `progress`: дверь не отпереть на ходу;
+##  * тревога — только на СТАРТЕ перехода (`progress == 0`): лифт, который уже поехал,
+##    назад не отзывают (иначе игрок наказан за то, чего не мог предвидеть). По той же
+##    причине окно идущему по ребру не открывается, а память о сработавшем окне
+##    (`fired_edges`, «одно окно на ребро») не тратится на того, кто не стоит.
+func _is_blocked_for(a, e: Dictionary) -> bool:
+	if _is_locked(e):
+		return true
+	return a.progress == 0 and _alarm_sealed(e)
+
+
 ## Окно выбирается по триггеру из данных миссии (`Mission.data["windows"]`).
 ## Окна перебираются в порядке массива: порядок элементов — порядок проверки
 ## (`02-format.md` §9). Запертая дверь симметрична: подход со стороны `b`
@@ -389,8 +420,13 @@ func _window_actor(w: Dictionary) -> Dictionary:
 	return {}
 
 
-## Группа стоит перед запертым ребром. Порядок своих — порядок `own`, правила
-## пропуска прежние: мёртвый, дошедший до выхода и кончивший маршрут окна не открывают.
+## Группа стоит перед ребром, которое сейчас непроходимо (замок или тревога). Порядок
+## своих — порядок `own`, правила пропуска прежние: мёртвый, дошедший до выхода и
+## кончивший маршрут окна не открывают.
+##
+## Условие берётся у `_is_blocked_for` — то же самое, что запрещает шаг в `_advance_own`.
+## Своё условие здесь и было дефектом: `_is_locked` на ребре, перекрытом тревогой, ложно,
+## и окно ★27 не открывалось ни разу.
 func _actor_before_locked_edge(edge_id: String) -> Dictionary:
 	if edge_id == "":
 		return {}
@@ -403,7 +439,7 @@ func _actor_before_locked_edge(edge_id: String) -> Dictionary:
 		var e: Dictionary = mission.edge_between(a.node, target)
 		if e.is_empty() or String(e["id"]) != edge_id:
 			continue
-		if _is_locked(e):
+		if _is_blocked_for(a, e):
 			return {"agent": a.id}
 	return {}
 
@@ -510,7 +546,13 @@ func order(option_id: String) -> Dictionary:
 		_apply_silence(w, eff)
 		current_window = null
 		_emit("order_silenced", {"window": w["id"], "effect": eff})
-		return {"accepted": true, "kind": "silence", "effect": eff}
+		## Текст исхода выбирается ПО ВЫБРАННОМУ качеству и отдаётся здесь: презентация
+		## берёт строку молчания из ответа на приказ, а окно к этому моменту уже закрыто
+		## (`current_window = null` выше), и спросить качество у него больше нечем.
+		## Ключ едет в ответе, а не в событии: формат `order_silenced` (`architecture.md`
+		## §5) — `{window, effect}`, и менять его ради ключа нельзя.
+		return {"accepted": true, "kind": "silence", "effect": eff,
+			"text_key": WindowScript.silence_key_for(w, String(eff["quality"]))}
 	# Проверка варианта — ДО списания. Иначе опечатка в идентификаторе сожгла бы
 	# приказ, добавила передачу в эфир и вернула «принято» — а харнесс задачи 11
 	# верит полю accepted и не отступил бы к молчанию.
@@ -628,6 +670,12 @@ func _apply_delay(w: Dictionary, amount: int) -> void:
 
 ## Открыть ребро. Ребро приходит из эффекта; если эффект его не назвал, берём ребро
 ## окна — так же, как это делал прежний `_unlock(w)`.
+##
+## Одна запись снимает ОБА запрета: замок (`_is_locked`) и тревожную блокировку
+## (`_alarm_sealed`). Так правило одно для обоих случаев и совпадает с §4.5 («`unlock`
+## во всех четырёх исходах у двери»): молчание, у которого хотя бы в одном исходе есть
+## `unlock`, выводит группу из тупика. Снимается блокировка ИМЕННО этого ребра — по id,
+## а не по виду: соседний лифт того же вида остаётся перекрытым.
 func _unlock(w: Dictionary, edge_id: String) -> void:
 	var target := edge_id
 	if target == "":

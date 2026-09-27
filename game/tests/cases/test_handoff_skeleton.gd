@@ -37,6 +37,13 @@ const SKELETON_RELATIVE := "../docs/handoff/2026-09-26-mission-content/example-m
 ## строки здесь (иначе кейс краснеет на MISSING_TEXT — то есть расхождение видно, а не
 ## проглочено). Вывести фикстуру из скелета нельзя: тогда она повторила бы данные и не
 ## поймала бы ни удалённый ключ, ни лишний.
+##
+## ФИКСТУРА ТЕКСТОВ дополняется обязательными системными ключами (`_fixture_texts`):
+## сверка текстов-словарём требует и их (04-texts.md §4), а скелет — образец формы
+## миссии, и системных текстов в нём нет вовсе. Независимый эталон перечня и
+## доказательство, что список валидатора не короче эталона, — в `test_content_validator.gd`
+## (§14); третьей копии здесь нет намеренно. Этот кейс проверяет другую половину:
+## что список валидатора не длиннее фикстуры.
 const SKELETON_TEXTS := {
 	"mission.01.title": "Операция «Тихий архив»",
 	"window.w_bio_door.text": "Биометрическая дверь на четвёртый.",
@@ -86,12 +93,34 @@ func _brief(problems: Array) -> String:
 	return "; ".join(parts) if not parts.is_empty() else "(проблем нет)"
 
 
+## Тексты, которые кейс передаёт валидатору и загрузчику: ключи скелета ПЛЮС обязательные
+## системные (04-texts.md §4). Скелет — образец ФОРМЫ миссии, и системных текстов он не
+## несёт; но сверка текстов-словарём требует их наличия, а обещание README («скелет
+## проходит наш валидатор») обязано остаться правдой. Список берётся у валидатора, эталон
+## его перечня — в кейсе валидатора (§14): так расхождение этих двух списков краснит
+## ассерт с именем ключа, а не молчит.
+func _fixture_texts() -> Dictionary:
+	var out := SKELETON_TEXTS.duplicate()
+	for key in Validator.REQUIRED_TEXT_KEYS:
+		out[String(key)] = "%s: системный текст" % String(key)
+	return out
+
+
 ## Коды проблем — чтобы «список непуст» не проходило вместо «диагноз ровно тот».
 func _codes_of(problems: Array) -> Array:
 	var out: Array = []
 	for p in problems:
 		out.append(String(p["code"]))
 	return out
+
+
+## Называет ли ДАННЫЕ этот ключ. Список берётся у валидатора (`_collect_text_keys`):
+## вопрос здесь — «ссылаются ли данные на ключ», а не «есть ли он в фикстуре».
+func _key_in(entries: Array, key: String) -> bool:
+	for entry in entries:
+		if String(entry["key"]) == key:
+			return true
+	return false
 
 
 func run() -> Array:
@@ -116,9 +145,10 @@ func run() -> Array:
 	# и проходит С ТЕКСТАМИ. Сверка ключей идёт только при переданном словаре, поэтому
 	# фикстура обязательна, а её непустота — отдельный ассерт.
 	var data = skeleton["data"]
-	t.is_true("фикстура текстов непуста (ключей: %d)" % SKELETON_TEXTS.size(),
-		not SKELETON_TEXTS.is_empty())
-	var problems: Array = Validator.validate(data, SKELETON_TEXTS)
+	var fixture_texts := _fixture_texts()
+	t.is_true("фикстура текстов непуста (ключей: %d)" % fixture_texts.size(),
+		not fixture_texts.is_empty())
+	var problems: Array = Validator.validate(data, fixture_texts)
 	t.eq("скелет без проблем валидатора: %s" % _brief(problems), problems, [])
 
 	# 2a. ПОЛОЖИТЕЛЬНЫЙ ассерт выше САМ ПО СЕБЕ вырожден: «проблем нет» верно и тогда,
@@ -128,25 +158,32 @@ func run() -> Array:
 	#
 	# Контроль первый: пустой словарь — это НЕ «пропустить сверку», а осмысленное «текстов
 	# нет» (отказ — это `null`). Тогда отсутствующими обязаны оказаться ВСЕ ключи, на
-	# которые ссылаются данные скелета, и ровно столько проблем. Число берётся у самого
-	# валидатора (`_collect_text_keys`), а не вписано константой: вписанное разошлось бы со
-	# скелетом при первом же новом окне, и проверка начала бы врать. Приватность здесь по
-	# соглашению (подчёркивание), как и у `Loader._items` в кейсе загрузчика.
+	# которые ссылаются данные скелета, ПЛЮС обязательные системные ключи, которых данные
+	# не называют вовсе. Число берётся у самого валидатора (`_collect_text_keys`), а не
+	# вписано константой: вписанное разошлось бы со скелетом при первом же новом окне, и
+	# проверка начала бы врать. Приватность здесь по соглашению (подчёркивание), как и у
+	# `Loader._items` в кейсе загрузчика.
 	var data_text_keys: Array = Validator._collect_text_keys(data)
 	t.is_true("у скелета есть ключи текстов (найдено: %d)" % data_text_keys.size(),
 		data_text_keys.size() > 0)
 	var expected_missing: Array = []
 	for _i in data_text_keys.size():
 		expected_missing.append(Problems.MISSING_TEXT)
+	## Ключ, лежащий И в данных, И в обязательном списке (`mission.01.title`), назван здесь
+	## ОДИН раз — как `MISSING_TEXT` на своём поле: `_check_required_texts` второго диагноза
+	## ему не выписывает.
+	for key in Validator.REQUIRED_TEXT_KEYS:
+		if not _key_in(data_text_keys, String(key)):
+			expected_missing.append(Problems.MISSING_REQUIRED_TEXT)
 	var without_texts: Array = Validator.validate(data, {})
-	t.eq("пустой словарь текстов — MISSING_TEXT на каждый ключ данных",
+	t.eq("пустой словарь текстов — диагноз на каждый отсутствующий ключ",
 		_codes_of(without_texts), expected_missing)
 
 	# Контроль второй: фикстура ИСПОРЧЕНА НАОБОРОТ — из неё убран ОДИН ключ, и валидатор
 	# обязан назвать ровно этот ключ и ровно этот путь. Именно так проверка перестаёт быть
 	# вырожденной: она краснеет, если сверка «ключ из данных есть в текстах» сломана,
 	# и краснеет, если фикстура перестала совпадать со скелетом.
-	var gapped_texts := SKELETON_TEXTS.duplicate()
+	var gapped_texts := fixture_texts.duplicate()
 	gapped_texts.erase("window.w_bio_door.text")
 	var gap_problems: Array = Validator.validate(data, gapped_texts)
 	t.eq("удалён один ключ фикстуры — ровно MISSING_TEXT",
@@ -164,7 +201,7 @@ func run() -> Array:
 	# «расхождение со схемой уронит прогон» (README пакета) держалось бы одной стороной.
 	# Здесь же видно и то, что `null` из сверки не выпадает незаметно: словарь передаётся
 	# явно, и лишний ключ в нём назван.
-	var extra_texts := SKELETON_TEXTS.duplicate()
+	var extra_texts := fixture_texts.duplicate()
 	extra_texts["window.которого.нет"] = "Лишний."
 	t.is_true("лишний ключ текстов — DANGLING_TEXT",
 		Problems.has(Validator.validate(data, extra_texts), Problems.DANGLING_TEXT))
@@ -172,7 +209,7 @@ func run() -> Array:
 		_codes_of(Validator.validate(data, extra_texts)).size() == 1)
 
 	# 3. «Форма проходит» без сборки ничего не стоит: из скелета обязана собираться миссия.
-	var loaded := Loader.load_mission(data, SKELETON_TEXTS)
+	var loaded := Loader.load_mission(data, fixture_texts)
 	var loaded_problems: Array = loaded["problems"]
 	t.is_true("миссия из скелета собрана: %s" % _brief(loaded_problems), loaded["mission"] != null)
 	if loaded["mission"] == null:
@@ -189,6 +226,6 @@ func run() -> Array:
 
 	# 5. Тексты доехали до модели тем же путём: `Mission` носит их в payload, и «ключ
 	# проверен, а текста в игре нет» — расхождение, которое иначе не видно.
-	t.eq("скелет: тексты доехали до модели", (mission.data["texts"] as Dictionary), SKELETON_TEXTS)
+	t.eq("скелет: тексты доехали до модели", (mission.data["texts"] as Dictionary), fixture_texts)
 
 	return t.results

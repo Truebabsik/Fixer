@@ -91,6 +91,27 @@ func run() -> Array:
 		String(open_edge["path"]), "windows.w_door.trigger.edge")
 	t.is_true("окно на незапертом ребре: ребро названо",
 		String(open_edge["message"]).contains("e_hall_vault"))
+	# «Не заперто» и «не запираемо» — разные вещи: ребро, перекрытое тревогой, дефектом
+	# НЕ является (`Response.blockable_kind`), и сообщение обязано называть обе причины,
+	# иначе автор идёт запирать ребро, которое и так запирается тревогой.
+	t.is_true("окно на незапираемом ребре: названы обе причины — «ни замком, ни тревогой»",
+		String(open_edge["message"]).contains("ни замком, ни тревогой"))
+
+	# Обязательный СИСТЕМНЫЙ текстовый ключ — свой код, а не `MISSING_TEXT`: у него НЕТ
+	# поля в данных миссии, на которое тот указывал бы, поэтому путь у проблемы другой —
+	# в пространстве имён ТЕКСТОВ (`texts.<ключ>`), там же, где у `DANGLING_TEXT`. Путь
+	# вида `windows[3].text_key` отправил бы автора искать несуществующее поле.
+	var required: Dictionary = Problems.missing_required_text("log.silence")
+	t.eq("нет обязательного системного текста: код", String(required["code"]),
+		"MISSING_REQUIRED_TEXT")
+	t.is_true("нет обязательного системного текста: код не про ключ данных",
+		String(required["code"]) != Problems.MISSING_TEXT)
+	t.eq("нет обязательного системного текста: путь в пространстве текстов",
+		String(required["path"]), "texts.log.silence")
+	t.is_true("нет обязательного системного текста: ключ назван",
+		String(required["message"]).contains("log.silence"))
+	t.is_true("нет обязательного системного текста: причина названа",
+		String(required["message"]).contains("систем"))
 
 	# 2. `has` ищет по коду — этим валидатор будет отвечать «эта болезнь уже названа».
 	var list := [missing, wrong]

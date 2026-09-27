@@ -172,7 +172,158 @@ func run() -> Array:
 		watched.advance()
 	t.eq("повторный вход в сенсор окна не открывает", watched.current_window, null)
 
+	# 5. Текст молчания выбирается ПО ВЫБРАННОМУ качеству. Прежде ветка молчания несла
+	# один `text_key`, и выпавшее качество на строку не влияло вовсе: при связисте
+	# импровизирует Эхо, а текст называл тактика. Здесь проверяется ВЫБОР ключа, а не
+	# наличие данных: ожидание построено по имени качества, а не взято из той же
+	# константы, что подставлена в окно.
+	var qualities := ["good", "neutral", "bad", "safe"]
+	var chosen = _make_locked(_with_quality_texts(
+		_window("w_texts", {"type": "locked_edge", "edge": "e_cell_hall"},
+			[_option("wait", 0, 0, [{"type": "noop"}])], noop_silence)))
+	chosen.advance()
+	t.is_true("окно с ключами качеств открылось", chosen.current_window != null)
+	if chosen.current_window == null:
+		return t.results
+	# 5а. Имена разведены (M5 ревью 2): поле окна — БАЗОВЫЙ ключ, функция — ключ качества.
+	# Пока имя было одно, читатель брал базовый ключ за «текст исхода» и получал базовую
+	# строку вместо строки выпавшего исхода. Ассерт держит различие двух ключей, а не факт
+	# их существования: одинаковые значения провалили бы его.
+	t.eq("поле окна — базовый ключ молчания, а не ключ качества",
+		String(chosen.current_window.get("silence_base_key", "")), "window.w_texts.silence")
+	for quality in qualities:
+		t.eq("текст молчания качества %s — ключ качества, а не базовый" % quality,
+			WindowScript.silence_key_for(chosen.current_window, quality),
+			"window.w_texts.silence.%s" % quality)
+
+	# 5б. Ответ на молчание несёт ключ ВЫБРАННОГО качества: окно к этому моменту уже
+	# закрыто (`current_window = null`), и презентации взять строку больше неоткуда.
+	# Ожидание выведено из СОСТАВА этого прогона, а не из ответа ядра: в плане кейса один
+	# тактик и связиста нет (`_make_locked`), значит качество определено однозначно —
+	# `safe` (`sim.gd:_resolve_silence`, D7/D41). Пока ожидание бралось из
+	# `answer["effect"]["quality"]`, ассерт сверял ответ сам с собой и «выбрано не то
+	# качество» поймать не мог (M2 ревью 2).
+	var expected_quality := "safe"
+	var window_before: Dictionary = chosen.current_window
+	var answer: Dictionary = chosen.order("silence")
+	t.eq("исход молчания при тактике без связиста — %s" % expected_quality,
+		String((answer["effect"] as Dictionary).get("quality", "")), expected_quality)
+	t.eq("ответ на молчание несёт ключ выбранного качества (%s)" % expected_quality,
+		String(answer.get("text_key", "")), "window.w_texts.silence.%s" % expected_quality)
+	t.is_true("базовый ключ в ответе не подставлен вместо качественного",
+		String(answer.get("text_key", "")) != String(window_before.get("silence_base_key", "")))
+
+	# 5в. Ключа качества в данных нет — читается базовый `silence.text_key`: окна старой
+	# формы остаются рабочими, а не превращаются в пустую строку.
+	var base_only = _make_locked(_window("w_base_only",
+		{"type": "locked_edge", "edge": "e_cell_hall"},
+		[_option("wait", 0, 0, [{"type": "noop"}])], noop_silence))
+	base_only.advance()
+	t.is_true("окно без ключей качеств открылось", base_only.current_window != null)
+	if base_only.current_window == null:
+		return t.results
+	t.eq("без ключа качества читается базовый ключ",
+		WindowScript.silence_key_for(base_only.current_window, "good"),
+		"window.w_base_only.silence")
+
+	# 5г. Ни ключа качества, ни базового нет — пустая строка. Ядро на неполных данных не
+	# падает и НЕ выдумывает ключ по имени окна: «текста нет» видно как пустой текст.
+	var no_keys_window := _window("w_no_keys", {"type": "locked_edge", "edge": "e_cell_hall"},
+		[_option("wait", 0, 0, [{"type": "noop"}])], noop_silence)
+	(no_keys_window["silence"] as Dictionary).erase("text_key")
+	var no_keys = _make_locked(no_keys_window)
+	no_keys.advance()
+	t.is_true("окно без ключей текста открылось", no_keys.current_window != null)
+	if no_keys.current_window == null:
+		return t.results
+	t.eq("нет ни ключа качества, ни базового — пустая строка",
+		WindowScript.silence_key_for(no_keys.current_window, "good"), "")
+
+	# 5д. Испорченное поле качества (не-строка) НЕ обнуляет карту: три валидных ключа
+	# остаются на месте, испорченный читается пустой строкой. Без охраны типа
+	# `String(не-строка)` — недопустимый конструктор: сборка окна обрывается, карта теряет
+	# ВСЕ ключи (включая валидные), `silence_key_for` молча отдаёт базовую строку — то есть
+	# игрок видит текст не того, кто решил, ровно тот дефект, ради которого ключи качеств
+	# и заводились (F2 ревью 2). Ожидание выписано литералами: оно не выведено из
+	# проверяемого кода, поэтому порча `_silence_text_keys` его краснит.
+	var broken_window := _with_quality_texts(
+		_window("w_broken_key", {"type": "locked_edge", "edge": "e_cell_hall"},
+			[_option("wait", 0, 0, [{"type": "noop"}])], noop_silence))
+	(broken_window["silence"] as Dictionary)["good_key"] = 5
+	var broken: Dictionary = WindowScript.from_data(broken_window, "kira")
+	t.eq("испорченный ключ качества: карта цела, валидные ключи на месте, испорченный пуст",
+		broken["silence_text_keys"],
+		{"good": "", "neutral": "window.w_broken_key.silence.neutral",
+			"bad": "window.w_broken_key.silence.bad", "safe": "window.w_broken_key.silence.safe"})
+	## Вторая половина правила — другой КЛАСС значения: массив. Число и массив ведут себя
+	## по-разному (`has` есть у массива и нет у числа), и охрана, «половинчатая» по типу
+	## (число пропустила, массив нет), краснит именно этот ассерт, а не первый.
+	var array_window := _with_quality_texts(
+		_window("w_array_key", {"type": "locked_edge", "edge": "e_cell_hall"},
+			[_option("wait", 0, 0, [{"type": "noop"}])], noop_silence))
+	(array_window["silence"] as Dictionary)["neutral_key"] = []
+	var broken_array: Dictionary = WindowScript.from_data(array_window, "kira")
+	t.eq("испорченный ключ качества (массив): карта цела, валидные ключи на месте, испорченный пуст",
+		broken_array["silence_text_keys"],
+		{"good": "window.w_array_key.silence.good", "neutral": "",
+			"bad": "window.w_array_key.silence.bad", "safe": "window.w_array_key.silence.safe"})
+
+	# 5е. Качество молчания определяется СОСТАВОМ, а не данными окна: есть живой связист —
+	# кубик даёт `good`/`neutral`/`bad`, нет — всегда `safe` (D7, D41). При штатном составе
+	# (тактик + связист) исход `safe` не выпадает НИ РАЗУ, а значит всё, что положено только
+	# в него, на штатном составе не играется. Это стык данных и состава, и проверяется он
+	# здесь, а не в кейсе окна: правилу нужен состав, а не форма данных.
+	var with_comms := _silence_rolls(
+		[{"id": "kira", "role": "tactician", "understanding": 3},
+			{"id": "echo", "role": "comms", "understanding": 3}], 200)
+	var no_comms := _silence_rolls([{"id": "kira", "role": "tactician", "understanding": 3}], 200)
+	t.is_true("при составе со связистом исходов молчания больше одного (корпус не вырожден): %s"
+		% _quality_line(with_comms), with_comms.size() > 1)
+	t.is_false("при составе со связистом исход safe не выпадает ни разу: %s"
+		% _quality_line(with_comms), with_comms.has("safe"))
+	t.is_true("без связиста исход safe выпадает: %s" % _quality_line(no_comms),
+		no_comms.has("safe"))
+
 	return t.results
+
+
+## Сколько раз какое качество молчания выпало за `throws` бросков на заданном составе.
+## Кубик живёт в одном месте (`sim.gd:_resolve_silence`, D7) и зависит только от живых
+## ролей: окно передаётся рантайм-формой — той же, что ядро отдаёт в `order("silence")`.
+func _silence_rolls(agents: Array, throws: int) -> Dictionary:
+	var data := _window("w_rolls", {"type": "locked_edge", "edge": "e_cell_hall"},
+		[_option("wait", 0, 0, [{"type": "noop"}])], [{"type": "noop"}])
+	var sim = _make_locked(data, agents)
+	var w: Dictionary = WindowScript.from_data(data, "kira")
+	var counts: Dictionary = {}
+	for _i in throws:
+		var quality := String(sim._resolve_silence(w)["quality"])
+		counts[quality] = int(counts.get(quality, 0)) + 1
+	return counts
+
+
+## Счёт качеств одной строкой и в фиксированном порядке — для имени ассерта: провал
+## обязан назвать распределение, а не «условие не выполнено». Порядок задан списком,
+## а не порядком словаря (детерминизм, `constraints.md` §1.6).
+func _quality_line(counts: Dictionary) -> String:
+	var parts: Array = []
+	for quality in ["good", "neutral", "bad", "safe"]:
+		if counts.has(quality):
+			parts.append("%s %d" % [quality, int(counts[quality])])
+	if parts.is_empty():
+		return "ни одного броска"
+	return ", ".join(parts)
+
+
+## Окно с ключами текста по качествам (`silence.<quality>_key`) — та форма, из которой
+## `WindowScript.silence_key_for` выбирает строку исхода. Отдельный хелпер, а не флаг
+## у `_window()`: кейс проверяет и окно БЕЗ ключей качеств (запасной базовый ключ), и
+## общий флаг сделал бы это неявным.
+func _with_quality_texts(window: Dictionary) -> Dictionary:
+	var silence: Dictionary = window["silence"]
+	for quality in ["good", "neutral", "bad", "safe"]:
+		silence["%s_key" % quality] = "window.%s.silence.%s" % [String(window["id"]), quality]
+	return window
 
 
 ## Данные окна с заданным триггером. Молчание описано всегда: у окна обязан быть
@@ -249,7 +400,11 @@ func _make(window: Dictionary, route: Array, exit_node: String, extra := {}):
 ## Миссия с запертой дверью и окном на неё: у фикстуры дверь открывается эффектами,
 ## а здесь нужно окно, которое дверь НЕ открывает — иначе память о сработавшем
 ## окне ничем не проверяется.
-func _make_locked(window: Dictionary):
+##
+## `agents` — состав группы: по умолчанию один тактик без связиста, потому что на нём
+## молчание всегда `safe` и проверки окна не зависят от кубика. Состав передаётся
+## явно там, где проверяется сам выбор качества (5е: стык данных и состава, D41).
+func _make_locked(window: Dictionary, agents: Array = []):
 	var m := Mission.new()
 	m.id = "windows_data_locked"
 	m.add_node("cell", 1, [])
@@ -260,7 +415,7 @@ func _make_locked(window: Dictionary):
 	var p := Plan.new()
 	p.route = ["cell", "hall"]
 	p.exit_node = "hall"
-	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
+	p.agents = agents if not agents.is_empty() else [{"id": "kira", "role": "tactician", "understanding": 3}]
 	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
 	sim.guards = []

@@ -9,6 +9,29 @@ const Assert := preload("res://tests/assert.gd")
 const Problems := preload("res://content/problems.gd")
 const Validator := preload("res://content/validator.gd")
 
+## ЭТАЛОН обязательных системных ключей — независимая копия перечня из постановки
+## (`docs/handoff/2026-09-26-mission-content/04-texts.md` §4 плюс блоки §3.1–3.2).
+## Список намеренно НЕ берётся из `Validator.REQUIRED_TEXT_KEYS`: эталон, производный от
+## проверяемого, не поймал бы ни одного ключа, выпавшего из списка валидатора
+## (`docs/agents/review-checklist.md` §2 — «ассерт, который не может покраснеть»).
+## Две стороны держатся вместе кейсом 14: цикл снимает каждый ключ эталона по одному
+## (список валидатора не короче эталона), положительный ассерт на полном наборе — что он
+## не длиннее.
+const REQUIRED_TEXTS := [
+	"mission.01.title",
+	"negotiation.intro", "negotiation.term.money", "negotiation.term.time",
+	"negotiation.term.truth", "negotiation.mediator.recognize",
+	"negotiation.mediator.answer.press", "negotiation.mediator.answer.yield",
+	"negotiation.dossier.offer", "negotiation.dossier.read", "negotiation.deal",
+	"team.kira.available", "team.echo.available", "team.market.intro",
+	"log.silence", "log.command.kira", "log.command.echo", "log.command.you",
+	"log.radio.jammed", "log.radio.intercepted", "log.alarm.raised", "log.ghost.mismatch",
+	"voice.kira.ack", "voice.kira.command", "voice.echo.joke",
+	"final.read", "final.hand_over", "final.destroy",
+	"outcome.extracted", "outcome.caught", "outcome.timeout",
+	"results.summary",
+]
+
 
 ## Корректная миссия: вход, коридор, цель за запертой дверью, патруль, сенсор, окно.
 ## Числа и топология минимальны: тест про валидатор, а не про баланс.
@@ -59,9 +82,14 @@ func _good() -> Dictionary:
 	}
 
 
-## Тексты ко всем ключам корректной миссии — ровно те, что она использует.
+## Тексты ко всем ключам корректной миссии — ровно те, что она использует, ПЛЮС
+## обязательные системные ключи (`REQUIRED_TEXTS`). Фикстура изображает ТЕКСТЫ СДАЧИ,
+## а сдача без системных ключей неполна (04-texts.md §4), и сверка, включённая словарём,
+## требует и их: без них положительные ассерты ниже («проблем нет») краснели бы на
+## ключах, которых фикстура и не должна выводить из данных. Значения условны — сверяется
+## наличие ключа, а не текст.
 func _texts_for(m: Dictionary) -> Dictionary:
-	return {
+	var out := {
 		"mission.01.title": "ТЕСТ",
 		"window.w_door.text": "Дверь.",
 		"window.w_door.breach": "Выбить.",
@@ -69,6 +97,10 @@ func _texts_for(m: Dictionary) -> Dictionary:
 		"ap.ap_hall.text": "Терминал.",
 		"ap.ap_hall.copy": "Скопировать.",
 	}
+	for key in REQUIRED_TEXTS:
+		if not out.has(key):
+			out[key] = "текст обязательного ключа"
+	return out
 
 
 func _codes(problems: Array) -> Array:
@@ -97,6 +129,34 @@ func _message_at(problems: Array, path: String) -> String:
 		if String(p["path"]) == path:
 			return String(p["message"])
 	return ""
+
+
+## Пути проблем — там, где сверяется «ровно это место», а не «проблема вообще есть».
+func _paths(problems: Array) -> Array:
+	var out: Array = []
+	for p in problems:
+		out.append(String(p["path"]))
+	return out
+
+
+## Диагнозы, в сообщении которых НАЗВАН ключ: список `Problems.brief`. Так проверяется
+## «проблема про этот ключ», чего «список непуст» не различает: без этого ассерт про
+## удалённый ключ проходил бы на любом чужом диагнозе.
+func _problems_naming(problems: Array, key: String) -> Array:
+	var out: Array = []
+	for p in problems:
+		if String(p["message"]).contains(key):
+			out.append(Problems.brief(p))
+	return out
+
+
+## Называет ли ДАННЫЕ этот ключ. Список берётся у валидатора (`_collect_text_keys`):
+## вопрос здесь — «ссылаются ли данные на ключ», а не «есть ли он в фикстуре».
+func _key_in(entries: Array, key: String) -> bool:
+	for entry in entries:
+		if String(entry["key"]) == key:
+			return true
+	return false
 
 
 ## Нарушения нормы имён типов: по строке на каждую проблему `MISSING_FIELD`/`WRONG_TYPE`,
@@ -152,6 +212,11 @@ func run() -> Array:
 	# и кейс краснел бы на DANGLING_TEXT про фикстуру. Подставлять туда словарь, собранный
 	# ИЗ ТЕХ ЖЕ данных, нельзя: он совпал бы по построению, то есть сверка выглядела бы
 	# включённой, ничего не умея поймать.
+	#
+	# `_texts_for` с этой задачи несёт ещё и обязательные системные ключи (`REQUIRED_TEXTS`):
+	# сверка текстов-словарём требует и их, а фикстура изображает тексты СДАЧИ. Поэтому
+	# положительные ассерты остаются положительными, а держат обязательность кейс 14 и
+	# адресные снятия в нём.
 
 	# 0. Корректная миссия проходит чисто — иначе все проверки ниже бессмысленны.
 	# Тексты — настоящие: положительный ассерт обязан включать и сверку ключей.
@@ -507,6 +572,44 @@ func run() -> Array:
 	t.eq("locked = false — WINDOW_ON_OPEN_EDGE, без WRONG_TYPE",
 		_codes(Validator.validate(honest_unlocked, null)), [Problems.WINDOW_ON_OPEN_EDGE])
 
+	# P11. «ЗАПИРАЕМО» = заперто замком ИЛИ перекрывается тревогой. Окно `w_stuck_lift`
+	# поставки миссии 01 висит на ребре `e_freight_4_0` (`lift_freight`), которое закрывает
+	# тревога, а не замок: прежняя проверка (по `bool(locked)`) называла такое окно
+	# `WINDOW_ON_OPEN_EDGE` — «сцены не будет» про сцену, которая есть.
+	#
+	# Виды рёбер, перекрываемых тревогой, валидатор СПРАШИВАЕТ у ядра
+	# (`Response.blockable_kind`), а не перечисляет у себя: второй список разошёлся бы
+	# с ядром молча — тот же класс, что `TRIGGER_TYPES`/`WINDOW_KINDS`.
+	var alarm_edge := _good()
+	alarm_edge["edges"][1]["locked"] = false
+	alarm_edge["edges"][1]["kind"] = "lift_main"
+	var alarm_problems: Array = Validator.validate(alarm_edge, null)
+	t.is_false("окно на перекрытом тревогой ребре — не WINDOW_ON_OPEN_EDGE",
+		Problems.has(alarm_problems, Problems.WINDOW_ON_OPEN_EDGE))
+
+	# Обратная сторона, без неё проверка выродилась бы в «WINDOW_ON_OPEN_EDGE не выдаём
+	# никогда»: ребро вида, который тревога не перекрывает, остаётся дефектом с прежним
+	# диагнозом и на прежнем пути.
+	var stair_edge := _good()
+	stair_edge["edges"][1]["locked"] = false
+	stair_edge["edges"][1]["kind"] = "stairs"
+	t.eq("окно на незапираемом ребре (лестница) — WINDOW_ON_OPEN_EDGE",
+		_codes_at(Validator.validate(stair_edge, null), "windows.w_door.trigger.edge"),
+		[Problems.WINDOW_ON_OPEN_EDGE])
+
+	# У запираемого тревогой ребра работает ПРЕЖНЯЯ проверка выполнимости: окно срабатывает
+	# один раз за миссию, и хотя бы один исход молчания обязан открывать ИМЕННО это ребро —
+	# иначе группа останется перед перекрытым лифтом навсегда. Это и есть правило, на которое
+	# опирается ledger задачи («`wait_rescue` у окна ★27 — риск игрока, а не тупик»).
+	var alarm_no_unlock := _good()
+	alarm_no_unlock["edges"][1]["locked"] = false
+	alarm_no_unlock["edges"][1]["kind"] = "lift_main"
+	for quality in ["good", "neutral", "bad", "safe"]:
+		alarm_no_unlock["windows"][0]["silence"][quality] = [{"type": "delay", "value": 1}]
+	t.eq("запираемое тревогой ребро без unlock в молчании — UNWINNABLE_EDGE",
+		_codes_at(Validator.validate(alarm_no_unlock, null), "windows.w_door.silence"),
+		[Problems.UNWINNABLE_EDGE])
+
 	# P5. Битая ссылка на ребро — ОДИН дефект, одно следствие: раньше выходило две проблемы
 	# (BAD_REF и UNWINNABLE_EDGE), и автор искал вторую причину, которой нет.
 	var broken_edge_window := _good()
@@ -599,6 +702,140 @@ func run() -> Array:
 	str_steps["access_points"][0]["actions"][0]["cost"] = {"steps": "четыре"}
 	t.eq("cost.steps строкой — WRONG_TYPE",
 		_codes_at(Validator.validate(str_steps, null), "access_points[0].actions[0].cost.steps"), [Problems.WRONG_TYPE])
+
+	# P10. `trace_key` — известное НЕОБЯЗАТЕЛЬНОЕ поле точки доступа (04-texts.md §3.4):
+	# ключ текста подсказки следа. Схема его не знала, и три обязательных ключа `ap.*.trace`
+	# поставки миссии 01 висели вне данных — проверять было нечего (правило 23).
+	#
+	# Два ассерта ниже держат РАЗНЫЕ половины, и вторая не следует из первой:
+	# поле принято схемой И ключ из него попал в сверку текстов (`_walk_text_keys` обходит
+	# поля с суффиксом `_key`). Положительный ассерт «проходит целиком» их не заменяет:
+	# он верен и тогда, когда обход ключей сломан, а текстов не передано.
+	var with_trace := _good()
+	with_trace["access_points"][0]["trace_key"] = "ap.ap_hall.trace"
+	var trace_texts := _texts_for(with_trace)
+	trace_texts["ap.ap_hall.trace"] = "Подсказка следа."
+	t.is_false("trace_key — не неизвестный ключ",
+		Problems.has(Validator.validate(with_trace, trace_texts), Problems.UNKNOWN_KEY))
+	t.is_false("ключ ap.*.trace не висячий: trace_key собран сверкой текстов",
+		Problems.has(Validator.validate(with_trace, trace_texts), Problems.DANGLING_TEXT))
+	t.is_true("точка доступа с trace_key проходит целиком",
+		Validator.validate(with_trace, trace_texts).is_empty())
+
+	# Тип необязательного поля проверяется, а не подразумевается: без проверки испорченное
+	# поле не названо ничем — сбор текстовых ключей берёт только строки, и число молча
+	# выпадает из сверки. Но проверка типа второго диагноза НЕ отменяет: на `trace_key: 5`
+	# выходят ДВА диагноза, и оба обязаны быть под ассертом. Прежняя версия звала
+	# `validate` с `texts = null`, поэтому каскада не видела вовсе и держала половину.
+	var bad_trace := _good()
+	bad_trace["access_points"][0]["trace_key"] = 5
+	var bad_trace_texts := _texts_for(bad_trace)
+	bad_trace_texts["ap.ap_hall.trace"] = "Подсказка следа."
+	var bad_trace_problems := Validator.validate(bad_trace, bad_trace_texts)
+	t.eq("trace_key числом — WRONG_TYPE на своём пути",
+		_codes_at(bad_trace_problems, "access_points[0].trace_key"), [Problems.WRONG_TYPE])
+	t.eq("trace_key числом — текст его ключа остался висячим: DANGLING_TEXT",
+		_codes_at(bad_trace_problems, "texts.ap.ap_hall.trace"), [Problems.DANGLING_TEXT])
+
+	# P12. ТЕКСТОВЫЕ КЛЮЧИ ПРОВЕРЯЮТСЯ ПО ТИПУ, а не только на присутствие
+	# (`validator.gd:_check_text_key`): испорченное поле молча выпадало из сбора ключей
+	# (`_walk_text_keys` берёт только строки), и автору приезжал `DANGLING_TEXT` про текст,
+	# которого он не терял, — без имени испорченного поля.
+	#
+	# Проверка типа второго диагноза НЕ отменяет: поле действительно оставляет свой текст
+	# без ссылки, поэтому на испорченное поле выходят ДВА диагноза — `WRONG_TYPE` про поле
+	# и `DANGLING_TEXT` про его текст. Каскад оставлен осознанно (как у `trace_key` выше),
+	# и обе половины закреплены ассертами.
+	#
+	# Поля проверяются ПО ОДНОМУ: общий хелпер доказывает правило, но не то, что каждое
+	# поле к нему подключено. Ключ качества молчания (`silence.<quality>_key`) — новая
+	# форма: его обязан принимать `_silence_keys()`, и он обязан попадать в сбор текстов,
+	# иначе все 44 ключа качеств поставки висели бы вне сверки.
+	var keyed := _good()
+	keyed["windows"][0]["text_key"] = "window.w_door.text"
+	keyed["windows"][0]["silence"]["good_key"] = "window.w_door.silence.good"
+	keyed["access_points"][0]["text_key"] = "ap.ap_hall.text"
+	keyed["access_points"][0]["actions"][0]["text_key"] = "ap.ap_hall.copy"
+	var keyed_texts := _texts_for(keyed)
+	keyed_texts["window.w_door.silence.good"] = "Эхо вскрывает дверь."
+	t.is_true("silence.good_key — известное схеме поле и ключ собран сверкой текстов",
+		Validator.validate(keyed, keyed_texts).is_empty())
+
+	# Положительная половина держит только «схема знает поле»: она верна и тогда, когда
+	# ключ качества не собирается (сверять просто нечего). Поэтому отсутствие текста у
+	# ключа качества обязано называться СВОИМ путём — иначе сбор ключ не видит.
+	#
+	# Путь здесь ИНДЕКСНЫЙ (`windows[0]`), а не по id окна: `_walk_text_keys` обходит файл,
+	# а не разобранную модель, и id ему неоткуда взять. У проверок типа путь другой
+	# (`windows.w_door.silence.good_key`) — пути двух диагнозов об одном поле не совпадают.
+	var keyed_missing := _texts_for(keyed)
+	keyed_missing.erase("window.w_door.silence.good")
+	t.eq("нет текста у ключа качества — MISSING_TEXT на пути поля",
+		_codes_at(Validator.validate(keyed, keyed_missing), "windows[0].silence.good_key"),
+		[Problems.MISSING_TEXT])
+
+	# Испорченные ключи: по одному на каждое поле из минимума (п. C задания).
+	var bad_window_text := _good()
+	bad_window_text["windows"][0]["text_key"] = 5
+	var bad_window_text_problems := Validator.validate(bad_window_text, _texts_for(bad_window_text))
+	t.eq("windows[].text_key числом — WRONG_TYPE на своём пути",
+		_codes_at(bad_window_text_problems, "windows.w_door.text_key"), [Problems.WRONG_TYPE])
+	t.eq("windows[].text_key числом — текст его ключа остался висячим: DANGLING_TEXT",
+		_codes_at(bad_window_text_problems, "texts.window.w_door.text"), [Problems.DANGLING_TEXT])
+	## Третий ассерт держит ГРАНИЦУ каскада: у одной ошибки ровно два следствия, и на
+	## стороне поля — только `WRONG_TYPE`. Он же покрывает охрану `_walk_text_keys`
+	## («собираем только строки»): сними её — число 5 уедет в сверку ключом «5», и к двум
+	## диагнозам добавится третий, `MISSING_TEXT`. Проба N1 в отчёте называет этот ассерт.
+	t.eq("windows[].text_key числом — ровно два диагноза, третьего нет",
+		_codes(bad_window_text_problems), [Problems.WRONG_TYPE, Problems.DANGLING_TEXT])
+
+	var bad_option_text := _good()
+	bad_option_text["windows"][0]["options"][0]["text_key"] = 5
+	t.eq("options[].text_key числом — WRONG_TYPE на своём пути",
+		_codes_at(Validator.validate(bad_option_text, _texts_for(bad_option_text)),
+			"windows.w_door.options[0].text_key"), [Problems.WRONG_TYPE])
+
+	var bad_silence_text := _good()
+	bad_silence_text["windows"][0]["silence"]["text_key"] = 5
+	t.eq("silence.text_key числом — WRONG_TYPE на своём пути",
+		_codes_at(Validator.validate(bad_silence_text, _texts_for(bad_silence_text)),
+			"windows.w_door.silence.text_key"), [Problems.WRONG_TYPE])
+
+	var bad_quality_text := _good()
+	bad_quality_text["windows"][0]["silence"]["good_key"] = 5
+	var bad_quality_texts := _texts_for(bad_quality_text)
+	bad_quality_texts["window.w_door.silence.good"] = "Эхо вскрывает дверь."
+	var bad_quality_problems := Validator.validate(bad_quality_text, bad_quality_texts)
+	t.eq("silence.good_key числом — WRONG_TYPE на своём пути",
+		_codes_at(bad_quality_problems, "windows.w_door.silence.good_key"), [Problems.WRONG_TYPE])
+	t.eq("silence.good_key числом — текст качества остался висячим: DANGLING_TEXT",
+		_codes_at(bad_quality_problems, "texts.window.w_door.silence.good"), [Problems.DANGLING_TEXT])
+
+	var bad_point_text := _good()
+	bad_point_text["access_points"][0]["text_key"] = 5
+	t.eq("access_points[].text_key числом — WRONG_TYPE на своём пути",
+		_codes_at(Validator.validate(bad_point_text, _texts_for(bad_point_text)),
+			"access_points[0].text_key"), [Problems.WRONG_TYPE])
+
+	var bad_action_text := _good()
+	bad_action_text["access_points"][0]["actions"][0]["text_key"] = 5
+	t.eq("access_points[].actions[].text_key числом — WRONG_TYPE на своём пути",
+		_codes_at(Validator.validate(bad_action_text, _texts_for(bad_action_text)),
+			"access_points[0].actions[0].text_key"), [Problems.WRONG_TYPE])
+
+	# Два поля минимума, у которых проверка типа была и раньше, но кейса не было:
+	# `title_key` (корень) и `note_key` (разведка). Без ассерта «проверено» держалось бы
+	# чтением кода — ровно тот класс, из-за которого этот раздел и появился.
+	var bad_title := _good()
+	bad_title["title_key"] = 5
+	t.eq("title_key числом — WRONG_TYPE на своём пути",
+		_codes_at(Validator.validate(bad_title, null), "title_key"), [Problems.WRONG_TYPE])
+
+	var bad_note_key := _good()
+	bad_note_key["intel"][0]["entries"][0]["note_key"] = 5
+	t.eq("intel[].entries[].note_key числом — WRONG_TYPE на своём пути",
+		_codes_at(Validator.validate(bad_note_key, null), "intel[0].entries[0].note_key"),
+		[Problems.WRONG_TYPE])
 
 	# I4 + M6: цена и эффекты варианта обязательны, сложность — 1..3.
 	for field in ["noise", "delay"]:
@@ -834,11 +1071,19 @@ func run() -> Array:
 		_codes(Validator.validate(_good(), null)), [])
 
 	# (б) `{}` — «текстов нет»: осмысленное утверждение, и тогда отсутствуют ВСЕ ключи
-	# данных. Именно этот ассерт краснеет, если сверку ключей случайно отключить.
+	# данных — и все обязательные системные ключи, которых данные не называют вовсе.
+	# Именно этот ассерт краснеет, если сверку ключей случайно отключить.
+	#
+	# Ключ, лежащий И в данных, И в обязательном списке (`mission.01.title`), назван здесь
+	# ОДИН раз — как `MISSING_TEXT` на своём поле: второго диагноза ему не выписывают
+	# (`validator.gd:_check_required_texts`), и кейс 14 держит это отдельным ассертом.
 	var expected_missing: Array = []
 	for _i in data_text_keys.size():
 		expected_missing.append(Problems.MISSING_TEXT)
-	t.eq("texts = {} — MISSING_TEXT на каждый ключ данных (%d)" % data_text_keys.size(),
+	for key in REQUIRED_TEXTS:
+		if not _key_in(data_text_keys, key):
+			expected_missing.append(Problems.MISSING_REQUIRED_TEXT)
+	t.eq("texts = {} — диагноз на каждый отсутствующий ключ (%d)" % expected_missing.size(),
 		_codes(Validator.validate(_good(), {})), expected_missing)
 
 	# 12в. ТРЕТЬЕ состояние второго аргумента: не `null` и не словарь. Тип у `texts` не указан
@@ -1021,5 +1266,87 @@ func run() -> Array:
 		typed_checked > 0)
 	var norm_violations := _type_name_norm_violations(norm_corpus)
 	t.eq("норма имён типов (нарушения: %s)" % "; ".join(norm_violations), norm_violations, [])
+
+	# 14. ОБЯЗАТЕЛЬНЫЕ СИСТЕМНЫЕ КЛЮЧИ (04-texts.md §4 и §3.1–3.2). Долг над
+	# `UNUSED_OK_PREFIXES` («обязательные группы не проверяются: текстов ноль, и такая
+	# проверка давала бы только ложные срабатывания») закрыт вместе с этим кейсом: тексты
+	# поставки есть, и пропажа обязательного ключа — реальный дефект контента.
+	#
+	# Почему прежней сверки для этих ключей НЕ ХВАТАЛО: у `log.silence` нет поля `*_key`
+	# в данных, поэтому `_collect_text_keys` его не видит вовсе. Ключ мог исчезнуть из
+	# поставки, и прогон оставался бы зелёным, а игра — без строки молчания, без
+	# «КОМАНДУЕТ» и без итогов.
+	#
+	# Эталон — `REQUIRED_TEXTS` в этом файле, а не константа валидатора (см. её шапку).
+	# Две стороны держатся вместе: цикл ниже снимает КАЖДЫЙ ключ эталона по одному —
+	# значит список валидатора не короче эталона; положительный ассерт на полном наборе —
+	# значит не длиннее (лишнее требование сделало бы его красным).
+	t.eq("эталон обязательных ключей — 32 ключа перечня (04-texts.md §4 + §3.1–3.2)",
+		REQUIRED_TEXTS.size(), 32)
+	var seen_keys: Dictionary = {}
+	var repeats: Array = []
+	for key in REQUIRED_TEXTS:
+		if seen_keys.has(key):
+			repeats.append(key)
+		else:
+			seen_keys[key] = true
+	t.eq("в эталоне нет повторов: %s" % (", ".join(repeats) if not repeats.is_empty() else "(нет)"),
+		repeats, [])
+
+	var full_texts := _texts_for(_good())
+	t.is_true("полный набор (ключи данных + эталон обязательных) проходит без проблем",
+		Validator.validate(_good(), full_texts).is_empty())
+
+	# 14а. Отрицательный контроль ПЕРВЫЙ: системный ключ БЕЗ поля в данных. Диагноз обязан
+	# называть ИМЕННО этот ключ, и ровно один: «список непуст» здесь не доказывает ничего.
+	var no_log := _texts_for(_good())
+	no_log.erase("log.silence")
+	var no_log_problems: Array = Validator.validate(_good(), no_log)
+	t.eq("нет обязательного ключа log.silence — ровно один диагноз",
+		_codes(no_log_problems), [Problems.MISSING_REQUIRED_TEXT])
+	t.eq("нет log.silence — путь в пространстве имён текстов, а не поля данных",
+		_paths(no_log_problems), ["texts.log.silence"])
+	t.is_true("нет log.silence — сообщение называет ключ",
+		_message_at(no_log_problems, "texts.log.silence").contains("log.silence"))
+
+	# 14б. Отрицательный контроль ВТОРОЙ: ключ, который ЛЕЖИТ В ДАННЫХ. Новое правило не
+	# «перекрывает» прежнюю сверку молча: диагноз остаётся про этот ключ и на его поле.
+	var no_data_key := _texts_for(_good())
+	no_data_key.erase("window.w_door.text")
+	var no_data_key_problems: Array = Validator.validate(_good(), no_data_key)
+	t.eq("нет ключа из данных (window.w_door.text) — ровно MISSING_TEXT",
+		_codes(no_data_key_problems), [Problems.MISSING_TEXT])
+	t.eq("нет window.w_door.text — путь на поле данных",
+		_paths(no_data_key_problems), ["windows[0].text_key"])
+	t.is_true("нет window.w_door.text — сообщение называет ключ",
+		_message_at(no_data_key_problems, "windows[0].text_key").contains("window.w_door.text"))
+
+	# 14в. ОДИН КЛЮЧ — ОДИН ДИАГНОЗ. `mission.01.title` лежит И в данных (`title_key`),
+	# И в обязательном списке: два диагноза (`MISSING_TEXT` от сверки данных и
+	# `MISSING_REQUIRED_TEXT` от нового правила) отправляли бы автора искать вторую
+	# причину, которой нет. Ровно один — и он на поле данных, где ключ и живёт.
+	var no_title := _texts_for(_good())
+	no_title.erase("mission.01.title")
+	var no_title_problems: Array = Validator.validate(_good(), no_title)
+	t.eq("mission.01.title и в данных, и в обязательных — ровно ОДИН диагноз",
+		_codes(no_title_problems), [Problems.MISSING_TEXT])
+	t.eq("mission.01.title отсутствует — путь на поле данных, а не в текстах",
+		_paths(no_title_problems), ["title_key"])
+	t.is_true("mission.01.title отсутствует — сообщение называет ключ",
+		_message_at(no_title_problems, "title_key").contains("mission.01.title"))
+
+	# 14г. И то же по одному на КАЖДЫЙ ключ эталона. Цикл держит список валидатора от
+	# молчаливого усыхания: ключ, выпавший из `REQUIRED_TEXT_KEYS`, перестаёт называться,
+	# и провал приходит с ЕГО именем, а не «проблема где-то в обязательных текстах».
+	# Число диагнозов сверяется дважды — «он называет ключ» и «других диагнозов нет»:
+	# первый ассерт верен и тогда, когда к верному диагнозу добавился лишний.
+	for key in REQUIRED_TEXTS:
+		var gapped := _texts_for(_good())
+		gapped.erase(key)
+		var gapped_problems: Array = Validator.validate(_good(), gapped)
+		t.eq("снят обязательный ключ «%s» — есть диагноз про него" % key,
+			_problems_naming(gapped_problems, key).size(), 1)
+		t.eq("снят обязательный ключ «%s» — и он единственный" % key,
+			gapped_problems.size(), 1)
 
 	return t.results
