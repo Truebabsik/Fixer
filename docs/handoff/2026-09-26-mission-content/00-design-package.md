@@ -95,9 +95,11 @@
      "cost": {"noise": 1, "delay": 2}, "effects": [{"type": "unlock", "edge": "e_office_it"}]}
   ],
   "silence": {
-    "text_key": "window.bio_door.silence",
-    "by": "tactician",
-    "effect": {"type": "reroute", "node": "office2", "delay": 3, "noise": 5}
+    "text_key": "window.w_bio_door.silence",
+    "good":    [{"type": "unlock", "edge": "e_office_it"}],
+    "neutral": [{"type": "delay", "value": 3}],
+    "bad":     [{"type": "delay", "value": 3}, {"type": "noise", "value": 5}],
+    "safe":    [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_office_it"}]
   }
 }
 ```
@@ -110,7 +112,7 @@
 4. Все пользовательские строки — **только ключи**, ни одной строки текста внутри JSON.
 5. Эффект — либо из перечисления известных ядру, либо `{"type": "engine_proposal", ...}` (§5).
 
-Перечисление эффектов, которое **ядро берётся реализовать** (по факту `_apply_option` / `_apply_silence`): `unlock` (открыть ребро), `noise` (шум), `delay` (задержка), `reroute` (перестроить маршрут, как молчание при запертой двери), `noop`.
+Перечисление эффектов, которое **ядро берёт реализовать** (по факту `_apply_option` / `_apply_silence`): `unlock` (открыть ребро), `noise` (шум), `delay` (задержка), `noop`. `reroute` из первой редакции снят: поиска пути в ядре нет, и «перестроить маршрут» выразить нечем — вместо него честная пара «`delay` + `unlock`».
 
 ### 4.4 Уровень B: разведданные и призраки
 

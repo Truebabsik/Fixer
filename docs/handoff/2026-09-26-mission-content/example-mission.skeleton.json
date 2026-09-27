@@ -84,8 +84,10 @@
       ],
       "silence": {
         "text_key": "window.w_bio_door.silence",
-        "by": "tactician",
-        "effect": { "type": "reroute", "node": "office2", "delay": 3, "noise": 5 }
+        "good":    { "type": "unlock", "edge": "e_office_it4" },
+        "neutral": { "type": "delay", "value": 3 },
+        "bad":     [{ "type": "delay", "value": 3 }, { "type": "noise", "value": 5 }],
+        "safe":    [{ "type": "delay", "value": 3 }, { "type": "unlock", "edge": "e_office_it4" }]
       }
     },
     {
@@ -107,8 +109,10 @@
       ],
       "silence": {
         "text_key": "window.w_echo_reads.silence",
-        "by": "comms",
-        "effect": { "type": "delay", "value": 2 }
+        "good":    { "type": "noop" },
+        "neutral": { "type": "delay", "value": 2 },
+        "bad":     [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 }],
+        "safe":    { "type": "delay", "value": 2 }
       }
     }
   ],
