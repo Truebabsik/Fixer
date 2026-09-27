@@ -128,6 +128,8 @@ func run() -> Array:
 	# 8. Запертая дверь симметрична: подход со стороны `b` открывает окно так же,
 	# как со стороны `a`. Пока проверялось `a.node == e["a"]`, агент, идущий против
 	# записи ребра, стоял бы до caught/timeout без окна и без события.
+	# ВНИМАНИЕ: этот блок идёт из `a` (маршрут начинается с якоря ребра) — им
+	# покрыт обычный случай. Настоящий подход со стороны `b` — в блоке 8б.
 	var back = _make_b_side()
 	back.advance()
 	t.is_true("окно открылось со стороны b", back.current_window != null)
@@ -147,6 +149,31 @@ func run() -> Array:
 	back.advance()
 	t.eq("агент со стороны b дошёл до цели", back.own[0].node, "exit")
 	t.eq("миссия со стороны b завершилась уходом", String(back.result()["outcome"]), "extracted")
+
+	# 8б. ТОТ ЖЕ дефект, но по-настоящему: агент идёт ОТ конца `b` К концу `a`.
+	# Ребро асимметрично (`a`="far_hall", `b`="near_hall") и заперто; маршрут
+	# начинается с `b`. Прежний блок этого не проверял: там маршрут стартовал с
+	# якоря `e["a"]`, то есть условие направления выполнялось и дефект молчал.
+	var rev = _make_reverse_side()
+	rev.advance()
+	t.is_true("окно открылось при ходе от b к a", rev.current_window != null)
+	## При сломанной симметрии окна нет, и обращение к нему уронило бы кейс целиком —
+	## тогда провал выглядел бы абортом, а не ассертом. Выходим с одним честным провалом.
+	if rev.current_window == null:
+		return t.results
+	t.eq("окно называет ребро при ходе от b к a", String(rev.current_window["edge"]), "e_far_near")
+	t.eq("окно знает агента", String(rev.current_window["agent"]), "kira")
+	t.is_true("событие окна есть и при ходе от b", _has_event(rev, "window_opened"))
+	t.is_true("окно не открыло дверь само", not bool(rev.unlocked.get("e_far_near", false)))
+	t.is_true("приказ принят при ходе от b", bool(rev.order("breach")["accepted"]))
+	t.is_true("дверь открыта приказом из b", bool(rev.unlocked.get("e_far_near", false)))
+	t.is_true("миссия не тронута и здесь", bool(rev.mission.edge("e_far_near")["locked"]))
+	# `breach` без задержки: один шаг перехода — и агент на дальнем конце.
+	rev.advance()
+	t.eq("агент из b прошёл запертую дверь", rev.own[0].node, "far_hall")
+	rev.advance()
+	t.eq("агент из b дошёл до цели", rev.own[0].node, "far_exit")
+	t.eq("миссия из b завершилась уходом", String(rev.result()["outcome"]), "extracted")
 
 	# 9. Завершённая миссия окна не открывает, и приказов после конца нет.
 	# `finished` был достижим при открытом окне: _check_end() шёл перед
@@ -187,6 +214,8 @@ func run() -> Array:
 ## Подход к запертой двери СО СТОРОНЫ `b`. В фикстуре запертая дверь ведёт в
 ## тупик (vault), поэтому маршрут «из vault» был бы разорван: соберём маленькую
 ## миссию, где дверь — обычный проход, записанный как `a` -> `b`.
+## ВНИМАНИЕ: маршрут здесь начинается с `cell`, а ребро записано `a`="cell", поэтому
+## агент идёт ИЗ `a`. Для настоящей проверки стороны `b` — `_make_reverse_side()`.
 func _make_b_side():
 	var m := Mission.new()
 	m.id = "b_side"
@@ -199,6 +228,28 @@ func _make_b_side():
 	var p := Plan.new()
 	p.route = ["cell", "hall", "exit"]
 	p.exit_node = "exit"
+	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
+	var sim := Sim.new()
+	sim.setup(m, p, {"orders": 3, "seed": 1})
+	sim.guards = []
+	return sim
+
+
+## Настоящий подход со стороны `b`: ребро записано как `a`="far_hall" -> `b`="near_hall",
+## а маршрут начинается с `near_hall`. Значит агент идёт ОТ конца `b` К концу `a` —
+## именно тот случай, который условие `a.node == e["a"]` ломало.
+func _make_reverse_side():
+	var m := Mission.new()
+	m.id = "reverse_side"
+	m.add_node("near_hall", 1, [])
+	m.add_node("far_hall", 1, [])
+	m.add_node("far_exit", 1, [])
+	m.add_edge("e_far_near", "far_hall", "near_hall", "door", 1, 0, true)
+	m.add_edge("e_far_exit", "far_hall", "far_exit", "corridor", 1, 0)
+	m.objective = "far_exit"
+	var p := Plan.new()
+	p.route = ["near_hall", "far_hall", "far_exit"]
+	p.exit_node = "far_exit"
 	p.agents = [{"id": "kira", "role": "tactician", "understanding": 3}]
 	var sim := Sim.new()
 	sim.setup(m, p, {"orders": 3, "seed": 1})
