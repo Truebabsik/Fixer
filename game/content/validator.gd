@@ -33,10 +33,26 @@ const INTEL_ENTRY_KEYS := ["kind", "id", "route", "period", "nodes", "node", "co
 const POINT_KEYS := ["id", "node", "kind", "text_key", "actions", "note"]
 const ACTION_KEYS := ["id", "text_key", "complexity", "cost", "effects", "note"]
 
+## Разделы-массивы: обязательны на корне (см. 02-format.md §1), но пустой массив —
+## нормальная миссия. «Ключа нет» и «ключ есть, но не массив» — разные болезни.
+##
+## Держать в согласии с `Mission.DATA_ARRAY_SECTIONS` (`sim/mission.gd:15`): там перечислено,
+## какие разделы модель миссии вообще принимает в `data`. Списки НЕ совпадают дословно —
+## здесь все шесть корневых массивов файла (`edges`, `patrols`, `sensors` ядру в `data` не
+## едут, они у него в жёстком API), — но новая секция обязана появиться в обоих.
+const ARRAY_SECTIONS := ["edges", "patrols", "sensors", "windows", "intel", "access_points"]
+## Обязательные корневые поля, кроме разделов: id миссии и ключ её названия.
+const REQUIRED_ROOT_STRINGS := ["id", "title_key"]
+## Вид окна и тип триггера — ОДИН список: `kind` обязан совпадать с `trigger.type`
+## (02-format.md §4.1), и третий вид, добавленный в один список, обязан появиться в обоих.
+## Две отдельные константы с одинаковым содержимым разошлись бы молча — тем самым дефектом,
+## против которого стоит сверка `kind` ↔ `trigger.type`. Имена оставлены оба: в месте
+## проверки окна читается «вид окна», в месте триггера — «тип триггера».
+const TRIGGER_TYPES := ["locked_edge", "node_entered", "guard_in_sensor"]
+const WINDOW_KINDS := TRIGGER_TYPES
 ## Виды эффектов, известные ядру. Всё остальное — только через engine_proposal.
 const EFFECT_TYPES := ["unlock", "noise", "delay", "noop", "engine_proposal", "money", "trace"]
 const POINT_KINDS := ["terminal", "door_panel", "camera", "climate"]
-const TRIGGER_TYPES := ["locked_edge", "node_entered", "guard_in_sensor"]
 const INTEL_KINDS := ["patrol", "sensor", "guard_count", "door_state"]
 const SILENCE_QUALITIES := ["good", "neutral", "bad", "safe"]
 
@@ -45,28 +61,119 @@ const RESERVED_AGENT_IDS := ["kira", "echo"]
 
 ## Ключи вне данных, которые обязаны существовать всегда (см. 04-texts.md §4
 ## постановки). Они не считаются висячими, даже если ни одно окно на них не ссылается.
+## `intel.` здесь потому, что пояснения к разведке адресуются по каналу и пометке
+## (`intel.hack.patrol_false`, 02-format.md §5), а не по id конкретного пункта: собрать
+## такие ключи из данных нельзя, и без префикса они получали ложный DANGLING_TEXT.
+##
+## ГРАНИЦА, названная прямо: валидатор проверяет только то, что ключи ИЗ ДАННЫХ есть
+## в текстах, и что чужих ключей нет. Присутствие обязательных текстовых ГРУПП
+## (`log.*`, `voice.*`, `final.*`, `outcome.*`, `results.*`) он НЕ проверяет: текстов
+## пока ноль, и такая проверка давала бы только ложные срабатывания. Это осознанное
+## решение, а не забытая проверка.
 const UNUSED_OK_PREFIXES := ["mission.", "negotiation.", "team.", "log.", "voice.",
-	"final.", "outcome.", "results."]
+	"final.", "outcome.", "results.", "intel."]
 
 
-## problems = validate(mission_dict, texts ?= {}).
-static func validate(data, texts: Dictionary = {}) -> Array:
+## problems = validate(mission_dict, texts).
+##
+## `texts` ОБЯЗАТЕЛЕН и значения по умолчанию не имеет намеренно. Прежний
+## `texts: Dictionary = {}` делал забывание невидимым: `validate(data)` на данных
+## с двумя десятками ключей возвращал «проблем нет», ничего не сверив, — тот же
+## молчаливый пропуск, что и `--check-only`, печатавший `Parse Error` с кодом 0.
+## Теперь `validate(data)` не компилируется, а выбор виден в каждой строке вызова:
+##
+##   `texts == null`      — сверка НЕ выполняется; это явный отказ вызывающего,
+##                          написанный в коде (не «забыл», а «здесь тексты не про это»);
+##   `texts` — словарь    — сверка выполняется. Пустой словарь тоже: «текстов нет» —
+##                          осмысленное утверждение, и тогда отсутствующими окажутся
+##                          ВСЕ ключи, на которые ссылаются данные;
+##   иное                 — ТРЕТЬЕ состояние: строка, число, логическое, массив и любой
+##                          другой не-словарь. Сверку вести нечем, и это ОШИБКА вызова,
+##                          а не «текстов нет»: она называется `WRONG_TYPE` с путём
+##                          `(тексты)`, и сверка не выполняется. Раньше вызов с чужим
+##                          вторым аргументом выглядел успешным: `load_mission(data,
+##                          "мусор-строка")` отдавал `problems = 0` и СОБРАННУЮ миссию,
+##                          а движок печатал в stderr `Nonexistent function 'has' in base
+##                          'String'` и обрывал `_check_texts` на первой же строке —
+##                          stderr вердиктом не является (§6.1.1). Триггер правдоподобен:
+##                          у `load_text(json_text: String, texts)` рядом оказываются два
+##                          строковых параметра, и подставить текст вместо словаря текстов
+##                          — естественная описка.
+##
+## Тип у `texts` не указан ровно потому, что `null` — законное значение: аннотация
+## `Dictionary` отвергла бы его на входе. Обратная сторона названа прямо: без аннотации
+## компилятор ловит ЗАБЫВАНИЕ аргумента, но не подстановку НЕ ТОГО, — поэтому третье
+## состояние проверяется явно, а не оставляется на движок. Нового кода проблемы «тексты
+## не переданы» нет: сам факт обязательности аргумента и есть защита (см. бриф A).
+static func validate(data, texts) -> Array:
 	if typeof(data) != TYPE_DICTIONARY:
-		return [Problems.wrong_type("(корень)", "словарь", type_string(typeof(data)))]
+		return [Problems.wrong_type("(корень)", TYPE_DICTIONARY, typeof(data))]
 	var problems: Array = []
 
 	_check_root_keys(data, problems)
+	_check_sections(data, problems)
+	_check_notes(data, "", problems)
 	var nodes := _check_nodes(data, problems)
 	_check_edges(data, nodes, problems)
 	_check_patrols(data, nodes, problems)
 	_check_sensors(data, nodes, problems)
 	_check_objective(data, nodes, problems)
 	_check_reachability(data, nodes, problems)
-	_check_windows(data, _known_ids(data, "edges"), _known_ids(data, "sensors"), problems)
+	_check_windows(data, _known_edges(data), _known_ids(data, "sensors"), _known_ids_from(nodes), problems)
 	_check_intel(data, _known_ids(data, "patrols"), problems)
-	_check_access_points(data, nodes, problems)
-	_check_texts(data, texts, problems)
+	_check_access_points(data, nodes, _known_ids(data, "edges"), problems)
+	## Третье состояние второго аргумента (см. контракт `validate` выше). Проверка стоит
+	## здесь, а не в `_check_texts`, потому что это форма АРГУМЕНТА, как и `(корень)` выше:
+	## `_check_texts` отвечает на вопрос «что в текстах против данных», и внутрь него
+	## не-словарь попадать не должен. Молча пропустить нельзя: именно так вызов с чужим
+	## вторым аргументом выглядел успешным, отдавая собранную миссию.
+	if texts != null and typeof(texts) != TYPE_DICTIONARY:
+		problems.append(Problems.wrong_type("(тексты)", TYPE_DICTIONARY, typeof(texts)))
+	else:
+		_check_texts(data, texts, problems)
 	return problems
+
+
+## Обязательные поля корня и типы разделов-массивов. Отдельно от `_check_root_keys`,
+## потому что это РАЗНЫЕ вопросы: «поля нет» и «поле есть, но не той формы».
+static func _check_sections(data: Dictionary, problems: Array) -> void:
+	for name in REQUIRED_ROOT_STRINGS:
+		if not data.has(name):
+			problems.append(Problems.missing_field(name, TYPE_STRING))
+		else:
+			var value := _string_or(data[name], name, problems)
+			if value == "" and typeof(data[name]) == TYPE_STRING:
+				problems.append(Problems.bad_value(name, "поле не может быть пустым"))
+	for name in ARRAY_SECTIONS:
+		if not data.has(name):
+			problems.append(Problems.missing_field(name, TYPE_ARRAY))
+			continue
+		if typeof(data[name]) != TYPE_ARRAY:
+			problems.append(Problems.wrong_type(name, TYPE_ARRAY, typeof(data[name])))
+
+
+## `note` разрешён в любом объекте, но только строкой (02-format.md §1). Обход всего
+## словаря: так новое поле с `note` не останется без проверки.
+static func _check_notes(value, path: String, problems: Array) -> void:
+	if typeof(value) == TYPE_DICTIONARY:
+		for key in value:
+			var child_path := "%s.%s" % [path, String(key)] if path != "" else String(key)
+			if String(key) == "note" and typeof(value[key]) != TYPE_STRING:
+				problems.append(Problems.wrong_type(child_path, TYPE_STRING, typeof(value[key])))
+			else:
+				_check_notes(value[key], child_path, problems)
+	elif typeof(value) == TYPE_ARRAY:
+		var arr: Array = value
+		for i in arr.size():
+			_check_notes(arr[i], "%s[%d]" % [path, i], problems)
+
+
+## Множество id помещений — тот же вид, что `_known_ids` для разделов-массивов.
+static func _known_ids_from(items: Dictionary) -> Dictionary:
+	var out := {}
+	for key in items:
+		out[String(key)] = true
+	return out
 
 
 ## Множество id раздела — для проверки ссылок на него.
@@ -80,16 +187,34 @@ static func _known_ids(data: Dictionary, section: String) -> Dictionary:
 	return out
 
 
+## id ребра → ЗНАЧЕНИЕ поля `locked` КАК ЕСТЬ. Не приведённое к `bool` и не `true`.
+##
+## Проверкам окон нужны ТРИ ответа про одно и то же ребро: существует ли ссылка (`has`),
+## заперто ли оно (`true`) и «поле испорчено — судить нельзя» (не-bool). Приведение здесь
+## и было бы дефектом: `bool("да")` — не существующий конструктор (рантайм-сбой движка),
+## `bool(1)` — тихая истина, то есть мусор превращался бы в уверенное «заперто».
+## Для ссылочных проверок (`_check_ref_key`, `_check_effects`) словарь ведёт себя как прежний:
+## ключи — существующие id.
+static func _known_edges(data: Dictionary) -> Dictionary:
+	var out := {}
+	if not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
+		return out
+	for e in (data["edges"] as Array):
+		if typeof(e) == TYPE_DICTIONARY and e.has("id"):
+			out[String(e["id"])] = e.get("locked", false)
+	return out
+
+
 # --- структура ----------------------------------------------------------------
 
 static func _check_root_keys(data: Dictionary, problems: Array) -> void:
 	for key in data:
 		if not ROOT_KEYS.has(String(key)):
 			problems.append(Problems.unknown_key(String(key), String(key)))
-	for required in [["nodes", TYPE_DICTIONARY], ["edges", TYPE_ARRAY], ["objective", TYPE_STRING]]:
+	for required in [["nodes", TYPE_DICTIONARY], ["objective", TYPE_STRING]]:
 		var name: String = required[0]
 		if not data.has(name):
-			problems.append(Problems.missing_field(name, type_string(required[1])))
+			problems.append(Problems.missing_field(name, required[1]))
 		else:
 			_expect_type(data[name], required[1], name, problems)
 
@@ -105,11 +230,11 @@ static func _check_nodes(data: Dictionary, problems: Array) -> Dictionary:
 		var node = data["nodes"][node_id]
 		var path := "nodes.%s" % String(node_id)
 		if typeof(node) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(node))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(node)))
 			continue
 		_check_keys(node, NODE_KEYS, path, problems)
 		if not node.has("floor"):
-			problems.append(Problems.missing_field("%s.floor" % path, "int"))
+			problems.append(Problems.missing_field("%s.floor" % path, TYPE_INT))
 		else:
 			_expect_int(node["floor"], "%s.floor" % path, problems)
 		if node.has("tags"):
@@ -122,17 +247,20 @@ static func _check_edges(data: Dictionary, nodes: Dictionary, problems: Array) -
 	if not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
 		return
 	var seen: Array = []
+	## Неупорядоченная пара помещений → id первого ребра между ними. Второе ребро
+	## станет невидимым: `edge_between` вернёт первое (02-format.md §2.2).
+	var pairs: Dictionary = {}
 	for i in (data["edges"] as Array).size():
 		var e = data["edges"][i]
 		var path := "edges[%d]" % i
 		if typeof(e) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(e))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(e)))
 			continue
 		_check_keys(e, EDGE_KEYS, path, problems)
 		for required in ["id", "a", "b", "kind", "steps", "noise"]:
 			if not e.has(required):
 				problems.append(Problems.missing_field("%s.%s" % [path, required],
-					"int" if required in ["steps", "noise"] else "String"))
+					TYPE_INT if required in ["steps", "noise"] else TYPE_STRING))
 		var eid := _string_or(e.get("id", ""), "%s.id" % path, problems)
 		if eid != "":
 			if seen.has(eid):
@@ -147,6 +275,14 @@ static func _check_edges(data: Dictionary, nodes: Dictionary, problems: Array) -
 					"нет помещения «%s»" % String(side[0])))
 		if a != "" and a == b:
 			problems.append(Problems.bad_value(path, "ребро в себя (петля): a и b совпадают"))
+		elif a != "" and b != "":
+			var pair := "%s|%s" % ([a, b] if a < b else [b, a])
+			if pairs.has(pair):
+				problems.append(Problems.bad_value(path,
+					"второе ребро между «%s» и «%s»: «%s» останется невидимым, движок вернёт «%s»"
+					% [a, b, eid if eid != "" else path, String(pairs[pair])]))
+			else:
+				pairs[pair] = eid if eid != "" else path
 		if e.has("kind"):
 			var kind := _string_or(e["kind"], "%s.kind" % path, problems)
 			if kind != "" and not Mission.EDGE_KINDS.has(kind):
@@ -161,7 +297,7 @@ static func _check_edges(data: Dictionary, nodes: Dictionary, problems: Array) -
 			if noise != null and int(noise) < 0:
 				problems.append(Problems.bad_value("%s.noise" % path, "шум не может быть отрицательным"))
 		if e.has("locked") and typeof(e["locked"]) != TYPE_BOOL:
-			problems.append(Problems.wrong_type("%s.locked" % path, "bool", type_string(typeof(e["locked"]))))
+			problems.append(Problems.wrong_type("%s.locked" % path, TYPE_BOOL, typeof(e["locked"])))
 
 
 static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array) -> void:
@@ -172,19 +308,21 @@ static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array)
 		var p = data["patrols"][i]
 		var path := "patrols[%d]" % i
 		if typeof(p) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(p))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(p)))
 			continue
 		_check_keys(p, PATROL_KEYS, path, problems)
 		if not p.has("id"):
-			problems.append(Problems.missing_field("%s.id" % path, "String"))
+			problems.append(Problems.missing_field("%s.id" % path, TYPE_STRING))
 		var pid := _string_or(p.get("id", ""), "%s.id" % path, problems)
 		if pid != "":
-			if seen.has(pid) or RESERVED_AGENT_IDS.has(pid):
+			if RESERVED_AGENT_IDS.has(pid):
+				problems.append(Problems.reserved_id("patrols", pid))
+			elif seen.has(pid):
 				problems.append(Problems.duplicate_id("patrols", pid))
 			else:
 				seen.append(pid)
 		if not p.has("route"):
-			problems.append(Problems.missing_field("%s.route" % path, "Array"))
+			problems.append(Problems.missing_field("%s.route" % path, TYPE_ARRAY))
 		else:
 			var route: Variant = _string_array_or(p["route"], "%s.route" % path, problems)
 			if route != null:
@@ -193,6 +331,13 @@ static func _check_patrols(data: Dictionary, nodes: Dictionary, problems: Array)
 				for n in route:
 					if not nodes.is_empty() and not nodes.has(String(n)):
 						problems.append(Problems.bad_ref("%s.route" % path, "нет помещения «%s»" % String(n)))
+				## Движок не ищет путь: охранник идёт по списку, и на разрыве застрянет
+				## (02-format.md §2.3). Соседние точки обязаны быть соединены ребром.
+				for k in max(0, (route as Array).size() - 1):
+					if not _connected(String(route[k]), String(route[k + 1]), data):
+						problems.append(Problems.bad_value("%s.route" % path,
+							"разрыв маршрута: «%s» и «%s» не соединены ребром"
+							% [String(route[k]), String(route[k + 1])]))
 		if p.has("period"):
 			var period: Variant = _int_or(p["period"], "%s.period" % path, problems)
 			if period != null and int(period) < 1:
@@ -207,11 +352,11 @@ static func _check_sensors(data: Dictionary, nodes: Dictionary, problems: Array)
 		var s = data["sensors"][i]
 		var path := "sensors[%d]" % i
 		if typeof(s) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(s))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(s)))
 			continue
 		_check_keys(s, SENSOR_KEYS, path, problems)
 		if not s.has("id"):
-			problems.append(Problems.missing_field("%s.id" % path, "String"))
+			problems.append(Problems.missing_field("%s.id" % path, TYPE_STRING))
 		var sid := _string_or(s.get("id", ""), "%s.id" % path, problems)
 		if sid != "":
 			if seen.has(sid):
@@ -219,7 +364,7 @@ static func _check_sensors(data: Dictionary, nodes: Dictionary, problems: Array)
 			else:
 				seen.append(sid)
 		if not s.has("nodes"):
-			problems.append(Problems.missing_field("%s.nodes" % path, "Array"))
+			problems.append(Problems.missing_field("%s.nodes" % path, TYPE_ARRAY))
 			continue
 		var list: Variant = _string_array_or(s["nodes"], "%s.nodes" % path, problems)
 		if list == null:
@@ -243,8 +388,16 @@ static func _check_objective(data: Dictionary, nodes: Dictionary, problems: Arra
 
 # --- достижимость -------------------------------------------------------------
 
-## От любого входа до цели и обратно. Граф неориентированный: ребро проходимо в обе
-## стороны, и это уже закреплено проверкой симметрии окна.
+## Два правила постановки: «вход → цель» (п. 14) и обратный путь «цель → вход» (п. 15).
+## Обратный путь проверяется ЯВНО, обходом от цели, а не выводом «граф неориентированный,
+## значит то же самое»: правило не должно зависеть от того, что рёбра сегодня проходимы
+## в обе стороны.
+##
+## Обе проверки РАБОТАЮТ и обе могут сообщить: при недостижимости прямого пути выдаётся
+## сообщение на каждый вход, и вдобавок срабатывает обратный обход (ни от цели, ни к цели
+## пути нет). Два сообщения на один разрыв — осознанно: это разные диагнозы, «от входа
+## до цели не дойти» и «от цели не вернуться к входу», и контент может чинить их разными
+## правками. При равенстве путей (обычный случай) обе проверки молчат.
 static func _check_reachability(data: Dictionary, nodes: Dictionary, problems: Array) -> void:
 	if nodes.is_empty() or not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
 		return
@@ -261,6 +414,15 @@ static func _check_reachability(data: Dictionary, nodes: Dictionary, problems: A
 		if not _reaches(entry, objective, data["edges"]):
 			problems.append(Problems.unreachable("objective",
 				"от входа «%s» до цели «%s» нет пути" % [entry, objective]))
+	## Обратный путь: от цели обязан быть достижим хотя бы один вход.
+	var has_reverse := false
+	for entry in entries:
+		if _reaches(objective, entry, data["edges"]):
+			has_reverse = true
+			break
+	if not has_reverse:
+		problems.append(Problems.unreachable("objective",
+			"от цели «%s» не дойти ни до одного входа: %s" % [objective, ", ".join(entries)]))
 
 
 static func _entry_nodes(nodes: Dictionary) -> Array:
@@ -297,96 +459,153 @@ static func _reaches(from: String, to: String, edges: Array) -> bool:
 
 # --- окна ---------------------------------------------------------------------
 
-static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sensors: Dictionary, problems: Array) -> void:
+## Есть ли ребро между парой помещений. Соседние точки маршрута патруля обязаны быть
+## соединены: движок ведёт охранника по списку и путь не ищет (02-format.md §2.3).
+static func _connected(a: String, b: String, data: Dictionary) -> bool:
+	if a == "" or b == "" or not data.has("edges") or typeof(data["edges"]) != TYPE_ARRAY:
+		return false
+	for e in (data["edges"] as Array):
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var ea := String(e.get("a", ""))
+		var eb := String(e.get("b", ""))
+		if (ea == a and eb == b) or (ea == b and eb == a):
+			return true
+	return false
+
+
+static func _check_windows(data: Dictionary, known_edges: Dictionary, known_sensors: Dictionary,
+		known_nodes: Dictionary, problems: Array) -> void:
 	if not data.has("windows") or typeof(data["windows"]) != TYPE_ARRAY:
 		return
 	var seen: Array = []
 	for i in (data["windows"] as Array).size():
 		var w = data["windows"][i]
-		var path := "windows[%d]" % i
+		var index_path := "windows[%d]" % i
 		if typeof(w) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(w))))
+			problems.append(Problems.wrong_type(index_path, TYPE_DICTIONARY, typeof(w)))
 			continue
-		_check_keys(w, WINDOW_KEYS, path, problems)
-		var wid := _string_or(w.get("id", ""), "%s.id" % path, problems)
+		## Путь окна — ПО ID, а не по индексу в массиве: так он читаемее и совпадает
+		## с путями вариантов, молчания и триггера (`windows.w_door.options[0]`).
+		## У окна без id (или с нестроковым id) назвать его больше нечем — остаётся индекс:
+		## id в этом поле может оказаться числом, массивом или отсутствовать вовсе, а путь
+		## обязан быть строкой и указывать хоть куда-то. Индексный путь здесь — не выбор,
+		## а единственное, что остаётся; по нему автор находит окно в массиве файла. Тогда
+		## `wid` дальше несёт `index_path` целиком (`windows[0]`), и пути полей выходят
+		## `windows[0].kind`, `windows[0].options[0]` — то есть без имени окна.
+		var wid := _string_or(w.get("id", ""), "%s.id" % index_path, problems)
 		if wid == "":
-			problems.append(Problems.missing_field("%s.id" % path, "String"))
-			wid = path
+			problems.append(Problems.missing_field("%s.id" % index_path, TYPE_STRING))
+			wid = index_path
 		elif seen.has(wid):
 			problems.append(Problems.duplicate_id("windows", wid))
 		else:
 			seen.append(wid)
+		var path := index_path if wid == index_path else "windows.%s" % wid
+		_check_keys(w, WINDOW_KEYS, path, problems)
 		if not w.has("text_key"):
-			problems.append(Problems.missing_field("%s.text_key" % path, "String"))
-		var trigger_type := _check_trigger(w, wid, known_edges, known_sensors, problems)
-		_check_options(w, wid, problems)
-		_check_silence(w, wid, trigger_type, problems)
+			problems.append(Problems.missing_field("%s.text_key" % path, TYPE_STRING))
+		var kind := ""
+		if not w.has("kind"):
+			problems.append(Problems.missing_field("%s.kind" % path, TYPE_STRING))
+		else:
+			kind = _string_or(w["kind"], "%s.kind" % path, problems)
+			if kind != "" and not WINDOW_KINDS.has(kind):
+				problems.append(Problems.bad_value("%s.kind" % path,
+					"неизвестный вид окна «%s», допустимы: %s" % [kind, ", ".join(WINDOW_KINDS)]))
+		var trigger := _check_trigger(w, wid, known_edges, known_sensors, known_nodes, problems)
+		var trigger_type := String(trigger["type"])
+		## `kind` обязан совпадать с `trigger.type`. Сам по себе `kind` вид окна не задаёт:
+		## рантайм-форму ядро собирает из `trigger.type` (`sim/window.gd:kind_for`), а `kind`
+		## лишь повторяет его для читателя. Расхождение — поле-обманка: автор думает, что
+		## выбрал вид окна, а ядро открыло другое. Сверяем и говорим прямо.
+		##
+		## Сверка идёт только для ИЗВЕСТНОГО вида: у «магии» диагноз уже есть
+		## («неизвестный вид окна»), и второе сообщение по тому же полю было бы вторым
+		## следствием одной ошибки.
+		if WINDOW_KINDS.has(kind) and trigger_type != "" and kind != trigger_type:
+			problems.append(Problems.bad_value("%s.kind" % path,
+				"вид окна «%s» не совпадает с триггером «%s»: рантайм-вид ядро строит из trigger.type, kind на него не влияет" % [kind, trigger_type]))
+		_check_options(w, wid, known_edges, problems)
+		_check_silence(w, wid, trigger_type, String(trigger["edge"]), known_edges, problems)
 
 
+## Разбор триггера. Возвращает его вид и ребро (пустая строка, если ребра нет):
+## вид нужен проверке молчания, ребро — проверке выполнимости окна у двери.
 static func _check_trigger(w: Dictionary, wid: String, known_edges: Dictionary,
-		known_sensors: Dictionary, problems: Array) -> String:
+		known_sensors: Dictionary, known_nodes: Dictionary, problems: Array) -> Dictionary:
 	if not w.has("trigger"):
-		problems.append(Problems.missing_field("windows.%s.trigger" % wid, "словарь"))
-		return ""
+		problems.append(Problems.missing_field("windows.%s.trigger" % wid, TYPE_DICTIONARY))
+		return {"type": "", "edge": ""}
 	var trigger = w["trigger"]
 	var path := "windows.%s.trigger" % wid
 	if typeof(trigger) != TYPE_DICTIONARY:
-		problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(trigger))))
-		return ""
+		problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(trigger)))
+		return {"type": "", "edge": ""}
 	_check_keys(trigger, TRIGGER_KEYS, path, problems)
 	if not trigger.has("type"):
-		problems.append(Problems.missing_field("%s.type" % path, "String"))
-		return ""
+		problems.append(Problems.missing_field("%s.type" % path, TYPE_STRING))
+		return {"type": "", "edge": ""}
 	var type := _string_or(trigger["type"], "%s.type" % path, problems)
 	if type == "":
-		return ""
+		return {"type": "", "edge": ""}
 	if not TRIGGER_TYPES.has(type):
 		problems.append(Problems.bad_value("%s.type" % path,
 			"неизвестный триггер «%s», допустимы: %s" % [type, ", ".join(TRIGGER_TYPES)]))
-		return ""
+		return {"type": "", "edge": ""}
+	var edge := ""
 	match type:
 		"locked_edge":
 			_check_ref_key(trigger, "edge", "ребра", path, known_edges, problems)
+			if typeof(trigger.get("edge", null)) == TYPE_STRING:
+				edge = String(trigger["edge"])
 		"node_entered":
-			_check_ref_key(trigger, "node", "помещения", path, {}, problems)
+			_check_ref_key(trigger, "node", "помещения", path, known_nodes, problems)
 		"guard_in_sensor":
 			_check_ref_key(trigger, "sensor", "сенсора", path, known_sensors, problems)
-	return type
+	return {"type": type, "edge": edge}
 
 
 ## Поле обязательно, и по возможности ссылается на существующий объект.
 static func _check_ref_key(obj: Dictionary, key: String, what: String, path: String,
 		known: Dictionary, problems: Array) -> void:
 	if not obj.has(key):
-		problems.append(Problems.missing_field("%s.%s" % [path, key], "String"))
+		problems.append(Problems.missing_field("%s.%s" % [path, key], TYPE_STRING))
 		return
 	var value := _string_or(obj[key], "%s.%s" % [path, key], problems)
 	if value != "" and not known.is_empty() and not known.has(value):
 		problems.append(Problems.bad_ref("%s.%s" % [path, key], "нет %s «%s»" % [what, value]))
 
 
-static func _check_options(w: Dictionary, wid: String, problems: Array) -> void:
+static func _check_options(w: Dictionary, wid: String, known_edges: Dictionary, problems: Array) -> void:
 	if not w.has("options"):
-		problems.append(Problems.missing_field("windows.%s.options" % wid, "Array"))
+		problems.append(Problems.missing_field("windows.%s.options" % wid, TYPE_ARRAY))
 		return
 	if typeof(w["options"]) != TYPE_ARRAY:
-		problems.append(Problems.wrong_type("windows.%s.options" % wid, "Array", type_string(typeof(w["options"]))))
+		problems.append(Problems.wrong_type("windows.%s.options" % wid, TYPE_ARRAY, typeof(w["options"])))
 		return
 	var options: Array = w["options"]
 	if options.is_empty():
 		problems.append(Problems.empty_section("windows.%s.options" % wid))
 		return
 	var seen: Array = []
+	## Сочетание цены и эффектов → id первого варианта с таким сочетанием (п. 20).
+	var by_effect: Dictionary = {}
 	for i in options.size():
 		var o = options[i]
 		var path := "windows.%s.options[%d]" % [wid, i]
 		if typeof(o) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(o))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(o)))
 			continue
 		_check_keys(o, OPTION_KEYS, path, problems)
-		for required in ["id", "text_key", "complexity", "cost"]:
-			if not o.has(required):
-				problems.append(Problems.missing_field("%s.%s" % [path, required], "String"))
+		## Ожидаемый тип в сообщении — по факту поля: `cost` словарь, `effects` массив,
+		## `complexity` число. Прежний общий «String» отправлял автора искать строку там,
+		## где схема её не обещала.
+		for required in [["id", TYPE_STRING], ["text_key", TYPE_STRING], ["complexity", TYPE_INT],
+				["cost", TYPE_DICTIONARY], ["effects", TYPE_ARRAY]]:
+			if not o.has(String(required[0])):
+				problems.append(Problems.missing_field("%s.%s" % [path, String(required[0])],
+					required[1]))
 		var oid := _string_or(o.get("id", ""), "%s.id" % path, problems)
 		if oid == "silence":
 			problems.append(Problems.silence_as_option(wid))
@@ -399,69 +618,170 @@ static func _check_options(w: Dictionary, wid: String, problems: Array) -> void:
 			var complexity: Variant = _int_or(o["complexity"], "%s.complexity" % path, problems)
 			if complexity != null and (int(complexity) < 1 or int(complexity) > 3):
 				problems.append(Problems.bad_value("%s.complexity" % path, "сложность от 1 до 3"))
+		var cost_ok := false
 		if o.has("cost"):
 			var cost = o["cost"]
 			var cost_path := "%s.cost" % path
 			if typeof(cost) != TYPE_DICTIONARY:
-				problems.append(Problems.wrong_type(cost_path, "словарь", type_string(typeof(cost))))
+				problems.append(Problems.wrong_type(cost_path, TYPE_DICTIONARY, typeof(cost)))
 			else:
 				_check_keys(cost, COST_KEYS, cost_path, problems)
+				cost_ok = true
 				for field in ["noise", "delay"]:
-					if cost.has(field):
-						var v: Variant = _int_or(cost[field], "%s.%s" % [cost_path, field], problems)
-						if v != null and int(v) < 0:
-							problems.append(Problems.bad_value("%s.%s" % [cost_path, field],
-								"цена не может быть отрицательной"))
+					if not cost.has(field):
+						problems.append(Problems.missing_field("%s.%s" % [cost_path, field], TYPE_INT))
+						cost_ok = false
+						continue
+					var v: Variant = _int_or(cost[field], "%s.%s" % [cost_path, field], problems)
+					if v == null:
+						cost_ok = false
+					elif int(v) < 0:
+						problems.append(Problems.bad_value("%s.%s" % [cost_path, field],
+							"цена не может быть отрицательной"))
 		if o.has("effects"):
-			_check_effects(o["effects"], "%s.effects" % path, problems)
+			_check_effects(o["effects"], "%s.effects" % path, known_edges, problems)
+		## Дубль варианта — два приказа с одинаковой ценой и одинаковыми последствиями:
+		## выбор между ними ничего не меняет. Порядок эффектов значим (импульс, шум,
+		## задержка — разный ход), поэтому сравнивается последовательность целиком.
+		var signature := _option_signature(o, cost_ok)
+		if signature == "":
+			continue
+		if by_effect.has(signature):
+			problems.append(Problems.make(Problems.DUPLICATE_ID, path,
+				"вариант совпал с «%s» по цене и эффектам" % String(by_effect[signature])))
+		else:
+			by_effect[signature] = oid if oid != "" else path
 
 
-static func _check_silence(w: Dictionary, wid: String, trigger_type: String, problems: Array) -> void:
+## Подпись варианта: цена плюс эффекты в порядке объявления. Пустая строка — подпись
+## неполна (цена или эффекты не той формы), сравнивать нечего: об этом уже сказано.
+## Значения приводятся `str`, а не `String(...)`: конструктор String на Variant падает
+## рантаймом («Invalid call 'String' constructor»), и подпись молча ломала прогон.
+static func _option_signature(o: Dictionary, cost_ok: bool) -> String:
+	if not cost_ok or not o.has("effects") or typeof(o["effects"]) != TYPE_ARRAY:
+		return ""
+	var cost: Dictionary = o["cost"]
+	var parts: Array = ["noise=%d" % int(cost["noise"]), "delay=%d" % int(cost["delay"])]
+	for i in (o["effects"] as Array).size():
+		var e = o["effects"][i]
+		if typeof(e) != TYPE_DICTIONARY or not e.has("type"):
+			return ""
+		parts.append("%d:type=%s" % [i, str(e["type"])])
+		for field in ["edge", "value", "id"]:
+			if e.has(field):
+				parts.append("%s=%s" % [field, str(e[field])])
+	return "|".join(parts)
+
+
+static func _check_silence(w: Dictionary, wid: String, trigger_type: String, trigger_edge: String,
+		known_edges: Dictionary, problems: Array) -> void:
 	var path := "windows.%s.silence" % wid
 	if not w.has("silence"):
 		problems.append(Problems.missing_silence(wid))
 		return
 	var silence = w["silence"]
 	if typeof(silence) != TYPE_DICTIONARY:
-		problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(silence))))
+		problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(silence)))
 		return
 	_check_keys(silence, SILENCE_KEYS, path, problems)
 	if not silence.has("text_key"):
-		problems.append(Problems.missing_field("%s.text_key" % path, "String"))
+		problems.append(Problems.missing_field("%s.text_key" % path, TYPE_STRING))
 	var complete := true
 	for quality in SILENCE_QUALITIES:
 		if not silence.has(quality):
 			complete = false
 	if not complete:
 		problems.append(Problems.missing_silence(wid))
+	## `form_ok` — «о молчании можно судить»: все четыре исхода на месте, и каждый из них
+	## массив. Если форма неполна, корень уже назван (`MISSING_SILENCE`), и второй диагноз
+	## про выполнимость был бы вторым следствием одной ошибки (см. шапку файла).
+	var form_ok := complete
+	var unlocks_edge := false
 	for quality in SILENCE_QUALITIES:
 		if not silence.has(quality):
 			continue
 		var q_path := "%s.%s" % [path, quality]
-		_check_effects(silence[quality], q_path, problems)
-		## Открывать ребро имеет смысл только у окна, привязанного к двери: окно
-		## «группа вошла в помещение» открывает то, чего в нём нет.
-		if trigger_type != "" and trigger_type != "locked_edge":
-			for effect in _as_effect_list(silence[quality]):
-				if String(effect.get("type", "")) == "unlock":
-					problems.append(Problems.bad_value(q_path,
-						"unlock у окна с триггером «%s»: открывать нечего" % trigger_type))
+		_check_effects(silence[quality], q_path, known_edges, problems)
+		## Разбор эффектов идёт только у массива: одиночный объект — уже названная болезнь
+		## формы (`_check_effects` → `WRONG_TYPE`, 02-format.md §4.5). Единый разбор обоих
+		## форматов есть только у `fallback` (§7) — там его и делает `_check_fallback`.
+		if typeof(silence[quality]) != TYPE_ARRAY:
+			form_ok = false
+			continue
+		for effect in (silence[quality] as Array):
+			## Не словарь — форма элемента уже названа (`WRONG_TYPE` в `_check_effects`),
+			## разбирать нечего, и о выполнимости судить не по чему.
+			if typeof(effect) != TYPE_DICTIONARY:
+				form_ok = false
+				continue
+			## Открывать ребро имеет смысл только у окна, привязанного к двери: окно
+			## «группа вошла в помещение» открывает то, чего в нём нет. `str`, а не
+			## `String`: значение приходит из данных и может быть словарём — конструктор
+			## `String` на таком значении падает рантаймом.
+			if str(effect.get("type", "")) == "unlock" \
+					and trigger_type != "" and trigger_type != "locked_edge":
+				problems.append(Problems.bad_value(q_path,
+					"unlock у окна с триггером «%s»: открывать нечего" % trigger_type))
+			## Зачёт выполнимости: `unlock` на нужное ребро — сам или внутри fallback.
+			if trigger_edge != "" and _opens_edge(effect, trigger_edge):
+				unlocks_edge = true
+	## Выполнимость окна у двери. Окно срабатывает один раз за миссию (02-format.md §4.2),
+	## а приказ может быть и не отдан: если ни один исход молчания не открывает ИМЕННО
+	## это ребро, группа остаётся перед запертой дверью навсегда. Варианты в зачёт не
+	## идут — молчание не должно означать провал. Достаточно одного исхода из четырёх:
+	## валидатор ловит невыполнимость, а не отступление от D37.
+	##
+	## Правило смотрит на РЕБРО, а не на имя триггера, и судит только о существующем
+	## ребре с ЧЕСТНЫМ `locked`:
+	##  * ребра нет (`BAD_REF` уже сказан) — судить не о чем, второго следствия не будет;
+	##  * `locked` не bool (`WRONG_TYPE` уже сказан в `_check_edges`) — о запертости судить
+	##    не по чему, и второго следствия одному дефекту не выписываем;
+	##  * ребро не заперто — окно не сработает ни разу, и это отдельный диагноз
+	##    (`WINDOW_ON_OPEN_EDGE`), а не невыполнимость;
+	##  * форма молчания неполна или неверна — корень назван (`MISSING_SILENCE`,
+	##    `WRONG_TYPE`), и о выполнимости судить рано.
+	if trigger_type == "locked_edge" and known_edges.has(trigger_edge):
+		var locked = known_edges[trigger_edge]
+		if typeof(locked) == TYPE_BOOL:
+			if not bool(locked):
+				problems.append(Problems.window_on_open_edge(wid, trigger_edge))
+			elif form_ok and not unlocks_edge:
+				problems.append(Problems.unwinnable_edge(wid, trigger_edge))
 
 
-static func _check_effects(raw, path: String, problems: Array) -> void:
+## Открывает ли эффект `unlock` указанное ребро. Считается и `fallback` предложения
+## движку: ядро применяет fallback, и если `unlock` стоит там — дверь откроется.
+##
+## Аргумент без типа намеренно: `fallback` бывает и списком, и одиночным объектом, и
+## элементом списка может оказаться что угодно. Не словарь — не открывает ничего:
+## форма такого элемента уже названа `WRONG_TYPE`, а падать валидатор не имеет права.
+static func _opens_edge(effect, edge: String) -> bool:
+	if typeof(effect) != TYPE_DICTIONARY:
+		return false
+	if str(effect.get("type", "")) == "unlock":
+		return str(effect.get("edge", "")) == edge
+	if str(effect.get("type", "")) != "engine_proposal":
+		return false
+	for fallback_effect in _as_effect_list(effect.get("fallback", null)):
+		if _opens_edge(fallback_effect, edge):
+			return true
+	return false
+
+
+static func _check_effects(raw, path: String, known_edges: Dictionary, problems: Array) -> void:
 	if typeof(raw) != TYPE_ARRAY:
-		problems.append(Problems.wrong_type(path, "Array", type_string(typeof(raw))))
+		problems.append(Problems.wrong_type(path, TYPE_ARRAY, typeof(raw)))
 		return
 	var effects: Array = raw
 	for i in effects.size():
 		var e = effects[i]
 		var e_path := "%s[%d]" % [path, i]
 		if typeof(e) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(e_path, "словарь", type_string(typeof(e))))
+			problems.append(Problems.wrong_type(e_path, TYPE_DICTIONARY, typeof(e)))
 			continue
 		_check_keys(e, EFFECT_KEYS, e_path, problems)
 		if not e.has("type"):
-			problems.append(Problems.missing_field("%s.type" % e_path, "String"))
+			problems.append(Problems.missing_field("%s.type" % e_path, TYPE_STRING))
 			continue
 		var type := _string_or(e["type"], "%s.type" % e_path, problems)
 		if type == "":
@@ -473,23 +793,60 @@ static func _check_effects(raw, path: String, problems: Array) -> void:
 		match type:
 			"unlock":
 				if not e.has("edge"):
-					problems.append(Problems.missing_field("%s.edge" % e_path, "String"))
+					problems.append(Problems.missing_field("%s.edge" % e_path, TYPE_STRING))
+				else:
+					var edge := _string_or(e["edge"], "%s.edge" % e_path, problems)
+					if edge != "" and not known_edges.is_empty() and not known_edges.has(edge):
+						problems.append(Problems.bad_ref("%s.edge" % e_path, "нет ребра «%s»" % edge))
 			"noise", "delay":
 				if not e.has("value"):
-					problems.append(Problems.missing_field("%s.value" % e_path, "int"))
+					problems.append(Problems.missing_field("%s.value" % e_path, TYPE_INT))
 				else:
 					var v: Variant = _int_or(e["value"], "%s.value" % e_path, problems)
 					if v != null and int(v) < 0:
 						problems.append(Problems.bad_value("%s.value" % e_path, "значение не может быть отрицательным"))
 			"engine_proposal":
-				for required in ["id", "want", "needs", "fallback"]:
-					if not e.has(required):
-						problems.append(Problems.missing_field("%s.%s" % [e_path, required],
-							"без fallback окно останется без эффекта"))
+				## `id`, `want`, `needs` — строки, `fallback` — одиночный эффект ИЛИ массив
+				## (§7) и он обязателен: без него окно останется без эффекта. Раньше в слот
+				## ожидаемого ТИПА подставлялась целая фраза, и автор читал «ожидался без
+				## fallback окно останется без эффекта».
+				for required in [["id", TYPE_STRING], ["want", TYPE_STRING], ["needs", TYPE_STRING],
+						["fallback", "словарь эффекта или массив эффектов"]]:
+					if not e.has(String(required[0])):
+						problems.append(Problems.missing_field("%s.%s" % [e_path, String(required[0])],
+							required[1]))
+				## `fallback` — эффект из §4.4, который сработает, если предложение
+				## отклонят. Он обязан быть разобран по тем же правилам: иначе
+				## `unlock` в fallback открывал бы несуществующее ребро.
+				if e.has("fallback"):
+					_check_fallback(e["fallback"], "%s.fallback" % e_path, known_edges, problems)
 
 
-## Эффект в молчании может быть как массивом, так и одиночным объектом — оба формата
-## равнозначны (см. постановку, §7). Здесь приводим к массиву для единой проверки.
+## `fallback` у `engine_proposal` — одиночный эффект ИЛИ массив, форматы равнозначны
+## (02-format.md §7). Приводим к массиву: `_check_effects` знает только массивы.
+##
+## Пустой массив — не «не тот тип»: тип как раз верный, пусто СОДЕРЖИМОЕ, и сказать надо
+## это. Прежнее сообщение («ожидался словарь эффекта, получен Array») врало: автор шёл
+## менять тип там, где тип правильный, а `fallback` был просто пустым.
+static func _check_fallback(raw, path: String, known_edges: Dictionary, problems: Array) -> void:
+	if typeof(raw) == TYPE_ARRAY and (raw as Array).is_empty():
+		problems.append(Problems.bad_value(path,
+			"пустой массив эффектов: `fallback` обязателен (§7), и если предложение отклонят, окно останется без эффекта"))
+		return
+	var list := _as_effect_list(raw)
+	if list.is_empty():
+		problems.append(Problems.wrong_type(path, "словарь эффекта или массив эффектов",
+			typeof(raw)))
+		return
+	_check_effects(list, path, known_edges, problems)
+
+
+## Приведение к списку эффектов. Терпимость к одиночному объекту — РОВНО там, где её
+## разрешает схема: `fallback` у `engine_proposal` (02-format.md §7: «один эффект объектом
+## либо массив эффектов — форматы равнозначны, парсер принимает оба»). В `silence.<quality>`
+## и `options[].effects` одиночный объект — ошибка формы: `_check_effects` выдаёт на него
+## `WRONG_TYPE`, и дальше он не разбирается. Здесь только нормализация; сама проверка формы
+## живёт в `_check_effects`.
 static func _as_effect_list(raw) -> Array:
 	if typeof(raw) == TYPE_ARRAY:
 		return raw
@@ -507,46 +864,95 @@ static func _check_intel(data: Dictionary, known_patrols: Dictionary, problems: 
 		var block = data["intel"][i]
 		var path := "intel[%d]" % i
 		if typeof(block) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(block))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(block)))
 			continue
 		_check_keys(block, INTEL_KEYS, path, problems)
 		if not block.has("channel"):
-			problems.append(Problems.missing_field("%s.channel" % path, "String"))
+			problems.append(Problems.missing_field("%s.channel" % path, TYPE_STRING))
 			continue
 		var channel := _string_or(block["channel"], "%s.channel" % path, problems)
+		if block.has("observed_at"):
+			var observed: Variant = _int_or(block["observed_at"], "%s.observed_at" % path, problems)
+			if observed != null and int(observed) < 0:
+				problems.append(Problems.bad_value("%s.observed_at" % path,
+					"снимок не может быть сделан на отрицательном шаге"))
 		if not block.has("entries") or typeof(block["entries"]) != TYPE_ARRAY:
-			problems.append(Problems.missing_field("%s.entries" % path, "Array"))
+			problems.append(Problems.missing_field("%s.entries" % path, TYPE_ARRAY))
 			continue
 		var lies := 0
+		## Ложь считается только по честным пометкам `false`: у мусора в поле диагноз уже
+		## есть (`WRONG_TYPE`), и `INTEL_LIE_COUNT` по тому же полю был бы вторым следствием.
+		var lies_known := true
 		var entries: Array = block["entries"]
 		for j in entries.size():
 			var entry = entries[j]
 			var e_path := "%s.entries[%d]" % [path, j]
 			if typeof(entry) != TYPE_DICTIONARY:
-				problems.append(Problems.wrong_type(e_path, "словарь", type_string(typeof(entry))))
+				problems.append(Problems.wrong_type(e_path, TYPE_DICTIONARY, typeof(entry)))
 				continue
 			_check_keys(entry, INTEL_ENTRY_KEYS, e_path, problems)
 			if not entry.has("kind"):
-				problems.append(Problems.missing_field("%s.kind" % e_path, "String"))
+				problems.append(Problems.missing_field("%s.kind" % e_path, TYPE_STRING))
 				continue
 			var kind := _string_or(entry["kind"], "%s.kind" % e_path, problems)
 			if not INTEL_KINDS.has(kind):
 				problems.append(Problems.bad_value("%s.kind" % e_path,
 					"неизвестный вид данных «%s», допустимы: %s" % [kind, ", ".join(INTEL_KINDS)]))
+			## Возраст данных — источник расхождения призрака с реальностью (02-format.md §5),
+			## поэтому он обязателен и не может быть отрицательным: «свежее, чем сейчас» —
+			## не данные, а ошибка.
+			if not entry.has("age_hours"):
+				problems.append(Problems.missing_field("%s.age_hours" % e_path, TYPE_INT))
+			else:
+				var age: Variant = _int_or(entry["age_hours"], "%s.age_hours" % e_path, problems)
+				if age != null and int(age) < 0:
+					problems.append(Problems.bad_value("%s.age_hours" % e_path,
+						"возраст данных не может быть отрицательным"))
 			## Данные разведки ссылаются на патруль по id: ссылка обязана существовать,
 			## иначе призрак на карте будет указывать в никуда.
 			if kind == "patrol" and entry.has("id"):
 				var patrol_id := _string_or(entry["id"], "%s.id" % e_path, problems)
 				if patrol_id != "" and not known_patrols.is_empty() and not known_patrols.has(patrol_id):
 					problems.append(Problems.bad_ref("%s.id" % e_path, "нет патруля «%s»" % patrol_id))
-			if bool(entry.get("false", false)):
-				lies += 1
+			## Поля разведки, объявленные схемой (§5), проверяются ПО ТИПУ: маршрут призрака —
+			## список помещений, период и счётчик — целые, состав сенсора — список, `false` —
+			## булево. Раньше эти поля не проверялись вовсе: `"route": "floor3"` и
+			## `"false": "да"` проходили молча, и обещание «скелет проверен валидатором»
+			## ничего не говорило про маршруты в разведке.
+			##
+			## Ссылки ВНУТРИ маршрута с графом НЕ сверяются: призрак обязан врать, и в скелете
+			## подброшенное расписание называет этаж, которого в миссии нет. Ложь здесь —
+			## часть уровня (D30), а не дефект ссылки.
+			if entry.has("route"):
+				_string_array_or(entry["route"], "%s.route" % e_path, problems)
+			if entry.has("period"):
+				_int_or(entry["period"], "%s.period" % e_path, problems)
+			if entry.has("nodes"):
+				_string_array_or(entry["nodes"], "%s.nodes" % e_path, problems)
+			if entry.has("node"):
+				_string_or(entry["node"], "%s.node" % e_path, problems)
+			if entry.has("count"):
+				_int_or(entry["count"], "%s.count" % e_path, problems)
+			if entry.has("note_key"):
+				_string_or(entry["note_key"], "%s.note_key" % e_path, problems)
+			## Пометка лжи. Не-bool — диагноз `WRONG_TYPE`, и счёт лож после него не считается:
+			## иначе на одну ошибку выходило бы два следствия (`WRONG_TYPE` и
+			## `INTEL_LIE_COUNT`), а автор искал бы недостающую ложь вместо кривого поля.
+			if entry.has("false"):
+				if typeof(entry["false"]) != TYPE_BOOL:
+					lies_known = false
+					problems.append(Problems.wrong_type("%s.false" % e_path, TYPE_BOOL,
+						typeof(entry["false"])))
+				elif bool(entry["false"]):
+					lies += 1
 		## Ложь агентуры — часть уровня, а не бросок: ровно один подброшенный пункт (D30).
-		if channel == "agents" and lies != 1:
+		## Считается только там, где все пометки `false` — честные bool.
+		if channel == "agents" and lies_known and lies != 1:
 			problems.append(Problems.intel_lie_count(channel, lies))
 
 
-static func _check_access_points(data: Dictionary, nodes: Dictionary, problems: Array) -> void:
+static func _check_access_points(data: Dictionary, nodes: Dictionary, known_edges: Dictionary,
+		problems: Array) -> void:
 	if not data.has("access_points") or typeof(data["access_points"]) != TYPE_ARRAY:
 		return
 	var seen: Array = []
@@ -554,12 +960,12 @@ static func _check_access_points(data: Dictionary, nodes: Dictionary, problems: 
 		var ap = data["access_points"][i]
 		var path := "access_points[%d]" % i
 		if typeof(ap) != TYPE_DICTIONARY:
-			problems.append(Problems.wrong_type(path, "словарь", type_string(typeof(ap))))
+			problems.append(Problems.wrong_type(path, TYPE_DICTIONARY, typeof(ap)))
 			continue
 		_check_keys(ap, POINT_KEYS, path, problems)
 		for required in ["id", "node", "kind", "text_key"]:
 			if not ap.has(required):
-				problems.append(Problems.missing_field("%s.%s" % [path, required], "String"))
+				problems.append(Problems.missing_field("%s.%s" % [path, required], TYPE_STRING))
 		var aid := _string_or(ap.get("id", ""), "%s.id" % path, problems)
 		if aid != "":
 			if seen.has(aid):
@@ -573,7 +979,11 @@ static func _check_access_points(data: Dictionary, nodes: Dictionary, problems: 
 			var kind := _string_or(ap["kind"], "%s.kind" % path, problems)
 			if kind != "" and not POINT_KINDS.has(kind):
 				problems.append(Problems.bad_value("%s.kind" % path, "неизвестный вид точки «%s»" % kind))
-		if not ap.has("actions") or typeof(ap["actions"]) != TYPE_ARRAY:
+		if not ap.has("actions"):
+			problems.append(Problems.missing_field("%s.actions" % path, TYPE_ARRAY))
+			continue
+		if typeof(ap["actions"]) != TYPE_ARRAY:
+			problems.append(Problems.wrong_type("%s.actions" % path, TYPE_ARRAY, typeof(ap["actions"])))
 			continue
 		var actions: Array = ap["actions"]
 		if actions.is_empty():
@@ -583,29 +993,64 @@ static func _check_access_points(data: Dictionary, nodes: Dictionary, problems: 
 			var action = actions[j]
 			var a_path := "%s.actions[%d]" % [path, j]
 			if typeof(action) != TYPE_DICTIONARY:
-				problems.append(Problems.wrong_type(a_path, "словарь", type_string(typeof(action))))
+				problems.append(Problems.wrong_type(a_path, TYPE_DICTIONARY, typeof(action)))
 				continue
 			_check_keys(action, ACTION_KEYS, a_path, problems)
-			for required in ["id", "text_key", "complexity", "cost"]:
-				if not action.has(required):
-					problems.append(Problems.missing_field("%s.%s" % [a_path, required], "String"))
+			## Ожидаемый тип — по факту поля: `complexity` число, `cost` словарь шагов.
+			for required in [["id", TYPE_STRING], ["text_key", TYPE_STRING], ["complexity", TYPE_INT],
+					["cost", TYPE_DICTIONARY]]:
+				if not action.has(String(required[0])):
+					problems.append(Problems.missing_field("%s.%s" % [a_path, String(required[0])],
+						required[1]))
 			var act_id := _string_or(action.get("id", ""), "%s.id" % a_path, problems)
 			if act_id != "":
 				if seen_actions.has(act_id):
 					problems.append(Problems.duplicate_id("%s.actions" % path, act_id))
 				else:
 					seen_actions.append(act_id)
+			if action.has("complexity"):
+				var act_complexity: Variant = _int_or(action["complexity"], "%s.complexity" % a_path, problems)
+				if act_complexity != null and (int(act_complexity) < 1 or int(act_complexity) > 3):
+					problems.append(Problems.bad_value("%s.complexity" % a_path, "сложность от 1 до 3"))
+			if action.has("cost"):
+				_check_action_cost(action["cost"], "%s.cost" % a_path, problems)
 			if action.has("effects"):
-				_check_effects(action["effects"], "%s.effects" % a_path, problems)
+				_check_effects(action["effects"], "%s.effects" % a_path, known_edges, problems)
+
+
+## Цена действия точки доступа — шаги (02-format.md §6): `cost.steps` обязателен,
+## целый и неотрицательный. Это единственное поле цены, которое знает эта форма.
+static func _check_action_cost(cost, cost_path: String, problems: Array) -> void:
+	if typeof(cost) != TYPE_DICTIONARY:
+		problems.append(Problems.wrong_type(cost_path, TYPE_DICTIONARY, typeof(cost)))
+		return
+	_check_keys(cost, ["steps", "note"], cost_path, problems)
+	if not cost.has("steps"):
+		problems.append(Problems.missing_field("%s.steps" % cost_path, TYPE_INT))
+		return
+	var steps: Variant = _int_or(cost["steps"], "%s.steps" % cost_path, problems)
+	if steps != null and int(steps) < 0:
+		problems.append(Problems.bad_value("%s.steps" % cost_path, "число шагов не может быть отрицательным"))
 
 
 # --- тексты -------------------------------------------------------------------
 
 ## Собирает все ключи, на которые ссылаются данные, сверяет с текстами и ищет висячие.
-static func _check_texts(data: Dictionary, texts: Dictionary, problems: Array) -> void:
+##
+## `texts == null` — сверки нет вовсе: ни `MISSING_TEXT`, ни `DANGLING_TEXT`. Это НЕ
+## «пустые тексты»: пустой словарь — осмысленное «текстов нет», и тогда каждый ключ
+## данных получает `MISSING_TEXT`. Разница между `null` и `{}` видна в каждой строке
+## вызова и покрыта кейсами (`test_content_validator.gd`, кейс 12б; скелет, кейс 2a).
+##
+## Сюда приходят только `null` или словарь: третье состояние называет `validate`, и до
+## сверки оно не доходит. Проверка формы аргумента живёт в ОДНОМ месте (`validate`),
+## а не дублируется здесь: второй такой же `typeof` разошёлся бы с первым молча.
+static func _check_texts(data: Dictionary, texts, problems: Array) -> void:
+	if texts == null:
+		return
 	var used := _collect_text_keys(data)
 	for entry in used:
-		if not texts.is_empty() and not texts.has(String(entry["key"])):
+		if not texts.has(String(entry["key"])):
 			problems.append(Problems.missing_text(String(entry["path"]), String(entry["key"])))
 	for key in texts:
 		if _is_key_used(used, String(key)):
@@ -661,7 +1106,7 @@ static func _check_keys(obj: Dictionary, allowed: Array, path: String, problems:
 
 static func _expect_type(value, expected: int, path: String, problems: Array) -> void:
 	if typeof(value) != expected:
-		problems.append(Problems.wrong_type(path, type_string(expected), type_string(typeof(value))))
+		problems.append(Problems.wrong_type(path, expected, typeof(value)))
 
 
 ## Число: целое значение. Дробное — WRONG_TYPE, а не BAD_VALUE: JSON в Godot отдаёт
@@ -671,7 +1116,7 @@ static func _expect_int(value, path: String, problems: Array) -> void:
 		return
 	if typeof(value) == TYPE_FLOAT and is_equal_approx(value, floor(value)):
 		return
-	problems.append(Problems.wrong_type(path, "int", type_string(typeof(value))))
+	problems.append(Problems.wrong_type(path, TYPE_INT, typeof(value)))
 
 
 ## Возвращает int или null, если значение не число нужной формы.
@@ -680,33 +1125,33 @@ static func _int_or(value, path: String, problems: Array):
 		return int(value)
 	if typeof(value) == TYPE_FLOAT and is_equal_approx(value, floor(value)):
 		return int(value)
-	problems.append(Problems.wrong_type(path, "int", type_string(typeof(value))))
+	problems.append(Problems.wrong_type(path, TYPE_INT, typeof(value)))
 	return null
 
 
 static func _string_or(value, path: String, problems: Array) -> String:
 	if typeof(value) != TYPE_STRING:
-		problems.append(Problems.wrong_type(path, "String", type_string(typeof(value))))
+		problems.append(Problems.wrong_type(path, TYPE_STRING, typeof(value)))
 		return ""
 	return String(value)
 
 
 static func _check_string_array(value, path: String, problems: Array) -> void:
 	if typeof(value) != TYPE_ARRAY:
-		problems.append(Problems.wrong_type(path, "Array", type_string(typeof(value))))
+		problems.append(Problems.wrong_type(path, TYPE_ARRAY, typeof(value)))
 		return
 	for i in (value as Array).size():
 		if typeof(value[i]) != TYPE_STRING:
-			problems.append(Problems.wrong_type("%s[%d]" % [path, i], "String", type_string(typeof(value[i]))))
+			problems.append(Problems.wrong_type("%s[%d]" % [path, i], TYPE_STRING, typeof(value[i])))
 
 
 ## Массив строк или null, если это не массив (проблема уже добавлена).
 static func _string_array_or(value, path: String, problems: Array):
 	if typeof(value) != TYPE_ARRAY:
-		problems.append(Problems.wrong_type(path, "Array", type_string(typeof(value))))
+		problems.append(Problems.wrong_type(path, TYPE_ARRAY, typeof(value)))
 		return null
 	for i in (value as Array).size():
 		if typeof(value[i]) != TYPE_STRING:
-			problems.append(Problems.wrong_type("%s[%d]" % [path, i], "String", type_string(typeof(value[i]))))
+			problems.append(Problems.wrong_type("%s[%d]" % [path, i], TYPE_STRING, typeof(value[i])))
 			return null
 	return value

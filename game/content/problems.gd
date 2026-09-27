@@ -7,7 +7,9 @@ extends RefCounted
 ## человек читает сообщение.
 ##
 ## Путь указывает место в файле контента, а не в рантайме: `nodes.hall.floor`,
-## `windows[2].options[0].id`. По нему автор находит ошибку, не читая загрузчик.
+## `windows.w_door.options[0].id`. По нему автор находит ошибку, не читая загрузчик.
+## Путь объекта — по его id, где id есть; индекс (`windows[2]`) остаётся только у объекта,
+## у которого id нет или он не строка: тогда назвать его больше нечем.
 ##
 ## Модуль ничего не печатает и ничего не проверяет — только строит проблемы.
 ## Проверки живут в `content/validator.gd`.
@@ -17,9 +19,11 @@ const MISSING_FIELD := "MISSING_FIELD"     ## обязательного пол�
 const WRONG_TYPE := "WRONG_TYPE"           ## поле есть, но другого типа
 const UNKNOWN_KEY := "UNKNOWN_KEY"         ## поле, которого схема не знает
 const EMPTY_SECTION := "EMPTY_SECTION"     ## раздел обязателен и не может быть пустым
+const BAD_JSON := "BAD_JSON"               ## строка не разбирается как JSON
 
 # --- значения: форма верна, значение бессмысленно ---
 const DUPLICATE_ID := "DUPLICATE_ID"       ## id повторяется внутри своего раздела
+const RESERVED_ID := "RESERVED_ID"         ## id занят движком (свои агенты, D-решение)
 const BAD_VALUE := "BAD_VALUE"             ## значение вне допустимого (диапазон, перечисление)
 const BAD_REF := "BAD_REF"                 ## ссылка на несуществующий объект
 const UNREACHABLE := "UNREACHABLE"         ## до цели нельзя дойти по рёбрам
@@ -27,6 +31,8 @@ const UNREACHABLE := "UNREACHABLE"         ## до цели нельзя дой�
 # --- правила уровня: форма и значения верны, нарушен закон игры ---
 const MISSING_SILENCE := "MISSING_SILENCE" ## у окна нет молчания (запрещено, D23)
 const SILENCE_AS_OPTION := "SILENCE_AS_OPTION" ## «молчать» подсунуто обычным вариантом
+const UNWINNABLE_EDGE := "UNWINNABLE_EDGE" ## окно оставляет группу перед запертой дверью навсегда
+const WINDOW_ON_OPEN_EDGE := "WINDOW_ON_OPEN_EDGE" ## окно привязано к ребру, которое не заперто: не сработает никогда
 const MISSING_TEXT := "MISSING_TEXT"       ## ключ текста не найден в текстах
 const DANGLING_TEXT := "DANGLING_TEXT"     ## ключ текста нигде не используется
 const INTEL_LIE_COUNT := "INTEL_LIE_COUNT" ## подброшенных пунктов не ровно один
@@ -36,16 +42,54 @@ static func make(code: String, path: String, message: String) -> Dictionary:
 	return {"code": code, "path": path, "message": message}
 
 
-static func missing_field(path: String, expected_type: String) -> Dictionary:
-	return make(MISSING_FIELD, path, "нет обязательного поля (ожидался %s)" % expected_type)
+## Имя типа для сообщений — по-русски и из ОДНОГО места: `TYPE_*` → слово, готовая строка
+## пропускается как есть (ею описывают ожидание там, где схема разрешает не один тип,
+## например `fallback`, §7). Незнакомый `TYPE_*` отдаётся через `type_string` — честный
+## откат вместо молчания.
+##
+## Норма словаря: `строка`, `массив`, `целое`, `логическое`, `дробное`, `словарь`, `ничто`.
+## Рамки сообщений безличные («ожидалось: …»): словарь смешанного рода, и любое
+## согласование («ожидался …») ломалось бы на половине слов.
+##
+## Рамка — часть контракта, а не оформление: на неё опираются ассерты кейсов (они сверяют
+## обе половины — ожидаемый и фактический тип). Менять формулировку значит менять и их.
+static func type_name(expected) -> String:
+	if typeof(expected) == TYPE_STRING:
+		return String(expected)
+	var names := {
+		TYPE_NIL: "ничто",
+		TYPE_BOOL: "логическое",
+		TYPE_INT: "целое",
+		TYPE_FLOAT: "дробное",
+		TYPE_STRING: "строка",
+		TYPE_STRING_NAME: "строка",
+		TYPE_ARRAY: "массив",
+		TYPE_DICTIONARY: "словарь",
+	}
+	var type := int(expected)
+	return String(names.get(type, type_string(type)))
 
 
-static func wrong_type(path: String, expected_type: String, actual_type: String) -> Dictionary:
-	return make(WRONG_TYPE, path, "ожидался %s, получен %s" % [expected_type, actual_type])
+## `expected` — `TYPE_*` (см. `type_name`) или готовое описание словами.
+static func missing_field(path: String, expected) -> Dictionary:
+	return make(MISSING_FIELD, path, "нет обязательного поля (ожидалось: %s)" % type_name(expected))
+
+
+## `expected` — `TYPE_*` или описание словами; `actual` — `typeof(значение)`, а не
+## `type_string(...)`: отображение имени живёт в `type_name`, а не размазано по вызовам.
+static func wrong_type(path: String, expected, actual: int) -> Dictionary:
+	return make(WRONG_TYPE, path, "ожидалось: %s, получено: %s" % [type_name(expected), type_name(actual)])
 
 
 static func unknown_key(path: String, key: String) -> Dictionary:
 	return make(UNKNOWN_KEY, path, "схема не знает поля «%s»" % key)
+
+
+## Строка и причина сбоя разбора: `error` — код `Error` от `JSON.parse()`,
+## `error_line` — 1-based номер строки (0, если движок его не знает).
+static func bad_json(error: int, error_line: int, error_message: String) -> Dictionary:
+	var where := "строка %d" % error_line if error_line > 0 else "(место неизвестно)"
+	return make(BAD_JSON, "(корень)", "не разбирается как JSON: %s — %s" % [error_message, where])
 
 
 static func empty_section(section: String) -> Dictionary:
@@ -54,6 +98,12 @@ static func empty_section(section: String) -> Dictionary:
 
 static func duplicate_id(section: String, id: String) -> Dictionary:
 	return make(DUPLICATE_ID, section, "id «%s» повторяется в разделе «%s»" % [id, section])
+
+
+## Отдельно от `duplicate_id`: повтора нет, id просто занят движком. Прежнее сообщение
+## «повторяется в разделе patrols» отправляло автора искать несуществующий дубль.
+static func reserved_id(section: String, id: String) -> Dictionary:
+	return make(RESERVED_ID, section, "id «%s» зарезервирован движком, в разделе «%s» его быть не может" % [id, section])
 
 
 static func bad_value(path: String, why: String) -> Dictionary:
@@ -78,6 +128,23 @@ static func silence_as_option(window_id: String) -> Dictionary:
 		"«молчать» подсунуто обычным вариантом: молчание встроено в форму окна и приказа не тратит")
 
 
+## Окно у запертой двери срабатывает один раз (02-format.md §4.2). Если ни один исход
+## молчания не открывает это ребро, молчание оставляет группу перед дверью навсегда —
+## тупик, а «ничто не является стеной, всё является ценой» (06-borders.md §4, D20).
+static func unwinnable_edge(window_id: String, edge: String) -> Dictionary:
+	return make(UNWINNABLE_EDGE, "windows.%s.silence" % window_id,
+		"ни один исход молчания не открывает ребро «%s»: окно сработает один раз, и группа останется перед дверью навсегда" % edge)
+
+
+## Окно с триггером `locked_edge` держится за ребро, которое никто не запирал.
+## Такое окно не откроется ни разу: ждать нечего. Это дефект контента, а не формальность —
+## автор считает, что поставил сцену у двери, а сцены не будет. Отдельный код, а не
+## `BAD_VALUE`: причина у дефекта своя, и автору нужно её название.
+static func window_on_open_edge(window_id: String, edge: String) -> Dictionary:
+	return make(WINDOW_ON_OPEN_EDGE, "windows.%s.trigger.edge" % window_id,
+		"окно ждёт запертое ребро «%s», а оно не заперто: окно не сработает никогда" % edge)
+
+
 static func missing_text(path: String, key: String) -> Dictionary:
 	return make(MISSING_TEXT, path, "ключа «%s» нет в текстах" % key)
 
@@ -91,8 +158,9 @@ static func intel_lie_count(channel: String, count: int) -> Dictionary:
 		"подброшенных пунктов %d, а у агентуры обязан быть ровно один" % count)
 
 
-## Есть ли среди проблем такая-то. Валидатор спрашивает этим, чтобы не повторять
-## одну и ту же болезнь по десять раз для одного объекта.
+## Есть ли среди проблем такая-то. Этим спрашивают тесты (и любой вызывающий, которому
+## важен один диагноз, а не весь список): валидатор отвечает не «болезнь уже названа»,
+## а тем, что каскадные проверки пропускаются по испорченному полю.
 static func has(problems: Array, code: String) -> bool:
 	for p in problems:
 		if String(p["code"]) == code:
@@ -100,6 +168,8 @@ static func has(problems: Array, code: String) -> bool:
 	return false
 
 
-## Сводка для сообщений: «BAD_REF nodes.hall» — коротко и однозначно.
+## Сводка для сообщений: «BAD_REF nodes.hall» — коротко и однозначно. Единственный
+## потребитель — кейс скелета постановки (`tests/cases/test_handoff_skeleton.gd`): список
+## проблем печатается в имени ассерта, чтобы провал называл причину, а не «список непуст».
 static func brief(p: Dictionary) -> String:
 	return "%s %s" % [String(p["code"]), String(p["path"])]

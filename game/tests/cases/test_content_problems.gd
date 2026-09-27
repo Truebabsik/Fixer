@@ -15,15 +15,32 @@ func run() -> Array:
 	var t := Assert.new()
 
 	# 1. Фабрики заполняют код, путь и сообщение — все три поля непусты.
-	var missing: Dictionary = Problems.missing_field("nodes.hall.floor", "int")
+	# Ожидаемый и фактический типы передаются как `TYPE_*`: имена раскрывает одна
+	# `Problems.type_name`, норма — русские слова.
+	var missing: Dictionary = Problems.missing_field("nodes.hall.floor", TYPE_INT)
 	t.eq("пропущенное поле: код", String(missing["code"]), "MISSING_FIELD")
 	t.eq("пропущенное поле: путь", String(missing["path"]), "nodes.hall.floor")
 	t.is_true("пропущенное поле: сообщение непусто", String(missing["message"]) != "")
+	t.is_true("пропущенное поле: тип назван по-русски",
+		String(missing["message"]).contains("целое"))
 
-	var wrong: Dictionary = Problems.wrong_type("edges[2].steps", "int", "String")
+	var wrong: Dictionary = Problems.wrong_type("edges[2].steps", TYPE_INT, TYPE_STRING)
 	t.eq("неверный тип: код", String(wrong["code"]), "WRONG_TYPE")
 	t.eq("неверный тип: путь", String(wrong["path"]), "edges[2].steps")
-	t.is_true("неверный тип: тип назван в сообщении", String(wrong["message"]).contains("int"))
+	# Сверяются ОБЕ половины, и каждая — в СВОЁМ слоте. Прежние два `contains` держали
+	# только «слово есть в сообщении»: перестановка аргументов в `wrong_type`
+	# («ожидалось: строка, получено: целое») оставляла оба ассерта зелёными — слова
+	# на месте, роли перепутаны, автор читает совет наоборот.
+	var wrong_message := String(wrong["message"])
+	t.is_true("неверный тип: ожидаемый тип назван в своём слоте",
+		wrong_message.contains("ожидалось: целое"))
+	t.is_true("неверный тип: фактический тип назван в своём слоте",
+		wrong_message.contains("получено: строка"))
+	# «Проходит как есть» — это обо ВСЁМ описании, а не о его первом слове: проба,
+	# обрезающая описание до «словарь эффекта», прежний ассерт не краснила.
+	t.is_true("неверный тип: описательное ожидание проходит как есть",
+		String(Problems.wrong_type("x", "словарь эффекта или массив эффектов", TYPE_ARRAY)["message"])
+			.contains("словарь эффекта или массив эффектов"))
 
 	var unknown: Dictionary = Problems.unknown_key("windows[0].option", "option")
 	t.eq("неизвестный ключ: код", String(unknown["code"]), "UNKNOWN_KEY")
@@ -40,6 +57,40 @@ func run() -> Array:
 	var ref: Dictionary = Problems.bad_ref("sensors[0].nodes[1]", "нет помещения ghost")
 	t.eq("битая ссылка: код", String(ref["code"]), "BAD_REF")
 	t.is_true("битая ссылка: путь назван", String(ref["path"]) != "")
+
+	# Зарезервированный id — не повтор: у проблемы свой код, иначе автор ищет дубль.
+	var reserved: Dictionary = Problems.reserved_id("patrols", "kira")
+	t.eq("занятый id: код", String(reserved["code"]), "RESERVED_ID")
+	t.is_true("занятый id: код не про дубль", String(reserved["code"]) != Problems.DUPLICATE_ID)
+	t.is_true("занятый id: «зарезервирован» в сообщении",
+		String(reserved["message"]).contains("зарезервирован"))
+
+	# Битый JSON несёт и причину, и строку: без них автор ищет запятую глазами.
+	var bad_json: Dictionary = Problems.bad_json(43, 3, "Expected '}'")
+	t.eq("битый JSON: код", String(bad_json["code"]), "BAD_JSON")
+	t.is_true("битый JSON: строка названа", String(bad_json["message"]).contains("строка 3"))
+	t.is_true("битый JSON: причина названа", String(bad_json["message"]).contains("Expected '}'"))
+
+	var no_line: Dictionary = Problems.bad_json(1, 0, "Parse error")
+	t.is_true("битый JSON без строки: место помечено",
+		String(no_line["message"]).contains("место неизвестно"))
+
+	# Окно у двери, которое не открывает эту дверь: свой код, не BAD_VALUE.
+	var unwinnable: Dictionary = Problems.unwinnable_edge("w_door", "e_hall_vault")
+	t.eq("невыполнимое окно: код", String(unwinnable["code"]), "UNWINNABLE_EDGE")
+	t.is_true("невыполнимое окно: ребро названо",
+		String(unwinnable["message"]).contains("e_hall_vault"))
+
+	# Окно на НЕзапертом ребре — соседний, но другой диагноз: группа пройдёт свободно,
+	# а окно не сработает ни разу. Код отдельный, чтобы автор не искал невыполнимость.
+	var open_edge: Dictionary = Problems.window_on_open_edge("w_door", "e_hall_vault")
+	t.eq("окно на незапертом ребре: код", String(open_edge["code"]), "WINDOW_ON_OPEN_EDGE")
+	t.is_true("окно на незапертом ребре: код не про невыполнимость",
+		String(open_edge["code"]) != Problems.UNWINNABLE_EDGE)
+	t.eq("окно на незапертом ребре: путь — триггер",
+		String(open_edge["path"]), "windows.w_door.trigger.edge")
+	t.is_true("окно на незапертом ребре: ребро названо",
+		String(open_edge["message"]).contains("e_hall_vault"))
 
 	# 2. `has` ищет по коду — этим валидатор будет отвечать «эта болезнь уже названа».
 	var list := [missing, wrong]

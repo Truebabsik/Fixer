@@ -7,14 +7,14 @@
 ## Быстрый старт
 
 ```powershell
+# Разбор всех скриптов конвейера без запуска тестов: 0 — разобрались все, 1 — провал
+tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --script res://tests/preflight.gd
+
 # Прогон проверок ядра: вердикт — код возврата процесса. 0 зелёно, 1 провал, 2 сломан приговор
 tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --script res://tests/run.gd
 
 # Красный путь: нарочно падающий кейс обязан упасть, а зелёный набор — пройти. Ожидаем код 0
 tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --script res://tests/run_red.gd
-
-# Быстрый разбор без запуска
-tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64_console.exe --headless --path game --check-only --script res://tests/run.gd
 
 # Редактор с проектом
 tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64.exe --path game --editor
@@ -27,7 +27,7 @@ tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64.exe --path game --editor
 | Путь | Что это |
 |---|---|
 | `game/sim/` | **ядро операции** — 10 модулей чистой логики, без нод и рендера |
-| `game/tests/` | общий приговор и список кейсов, ассерты, 12 кейсов, фикстура миссии |
+| `game/tests/` | общий приговор и список кейсов, ассерты, 17 кейсов, фикстура миссии |
 | `docs/design.md` | дизайн-документ (единственный источник правды по дизайну) |
 | `docs/desions.md` | журнал решений: что выбрано, что отвергнуто и почему |
 | `docs/architecture.md` | слои, соглашения кода, верификация, тулчейн |
@@ -51,6 +51,6 @@ tools\Godot_v4.7.2\Godot_v4.7.2-stable_win64.exe --path game --editor
 |---|---|---|
 | П1 — ядро операции | `docs/archive/` | **реализовано**, влито в `main` |
 | Контент миссии 01 (данные + тексты) | `docs/handoff/2026-09-26-mission-content/` | **постановка готова**, генерация — во внешней сессии |
-| Контент-конвейер: загрузка миссии из JSON и валидатор | — | не начато |
+| Контент-конвейер: загрузка миссии из JSON, валидатор, окна из данных | `game/content/`, `game/sim/` | **реализовано** (2026-09-27) |
 | Презентация: карта, база, планшет, итоги | — | не начато |
 | Прогоны и баланс на реальной миссии | — | ждёт контента |

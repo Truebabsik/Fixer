@@ -86,29 +86,32 @@
 ```json
 {
   "id": "w_bio_door",
+  "kind": "locked_edge",
   "trigger": {"type": "locked_edge", "edge": "e_office_it"},
-  "text_key": "window.bio_door.text",
+  "text_key": "window.w_bio_door.text",
   "options": [
-    {"id": "breach", "text_key": "window.bio_door.breach", "complexity": 1,
+    {"id": "breach", "text_key": "window.w_bio_door.breach", "complexity": 1,
      "cost": {"noise": 8, "delay": 0}, "effects": [{"type": "unlock", "edge": "e_office_it"}]},
-    {"id": "pick", "text_key": "window.bio_door.pick", "complexity": 2,
+    {"id": "pick", "text_key": "window.w_bio_door.pick", "complexity": 2,
      "cost": {"noise": 1, "delay": 2}, "effects": [{"type": "unlock", "edge": "e_office_it"}]}
   ],
   "silence": {
     "text_key": "window.w_bio_door.silence",
     "good":    [{"type": "unlock", "edge": "e_office_it"}],
-    "neutral": [{"type": "delay", "value": 3}],
-    "bad":     [{"type": "delay", "value": 3}, {"type": "noise", "value": 5}],
+    "neutral": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_office_it"}],
+    "bad":     [{"type": "delay", "value": 3}, {"type": "noise", "value": 5}, {"type": "unlock", "edge": "e_office_it"}],
     "safe":    [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_office_it"}]
   }
 }
 ```
 
+**Полная форма окна — §4 в `02-format.md`; здесь она сокращена.** Обрати внимание: `unlock` стоит во всех четырёх исходах молчания, и это не дублирование — молчание у запертой двери открывает её всегда, разной бывает только цена (см. `02-format.md` §4.5).
+
 Инварианты, обязательные к соблюдению (проверяет наш валидатор, см. §6):
 
 1. **Вариант «молчать» — не в списке `options`.** Он всегда есть структурно (поле `silence`) и не требует приказа. Это прямое следствие `window.gd:5` и `sim.gd:371`.
-2. `kind` окна — расширяемое перечисление; П1 знает только `locked_edge`.
-3. `complexity` — 1–3 по числу условий (D31, `spr/mercs.md` §1). Поле читается только вместе с наймом; заполнять обязательно.
+2. `kind` окна **обязан совпадать с `trigger.type`** (`locked_edge`, `node_entered`, `guard_in_sensor`). Ядро строит вид окна из триггера, поэтому расхождение отвергается валидатором: иначе поле было бы обманкой.
+3. `complexity` — 1–3 по числу условий. Поле читается только вместе с наймом, но заполнять обязательно.
 4. Все пользовательские строки — **только ключи**, ни одной строки текста внутри JSON.
 5. Эффект — либо из перечисления известных ядру, либо `{"type": "engine_proposal", ...}` (§5).
 

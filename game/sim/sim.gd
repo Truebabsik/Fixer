@@ -32,6 +32,11 @@ var visible_last: Dictionary = {}
 var ghost_reported: Dictionary = {}
 ## id бойца -> помещение, где его уже засекли. Сбрасывается в setup().
 var compromised_at: Dictionary = {}
+## Учёт сработавших окон: id окна из данных -> true и ребро окна запертой двери ->
+## true. Сбрасывается в setup(). Нужен, чтобы окно не открывалось второй раз:
+## «одно окно — один срабатывающий раз» (`02-format.md` §4.2).
+var fired_windows: Dictionary = {}
+var fired_edges: Dictionary = {}
 var orders_left: int = 3
 var rng := RandomNumberGenerator.new()
 var current_window = null
@@ -60,6 +65,8 @@ func setup(mission_, plan_, config := {}) -> void:
 	visible_last = {}
 	ghost_reported = {}
 	compromised_at = {}
+	fired_windows = {}
+	fired_edges = {}
 	current_window = null
 	objective_done = false
 	finished = false
@@ -334,16 +341,59 @@ func _is_locked(e: Dictionary) -> bool:
 	return not bool(unlocked.get(String(e["id"]), false))
 
 
-## Окно открывается, когда план упёрся в запертую дверь.
-## Запертая дверь симметрична: подход со стороны `b` упирается в неё так же, как
-## со стороны `a`, и обязан открыть окно. Иначе агент, идущий «против» записи
-## ребра, молча стоял бы до caught/timeout, не получив ни окна, ни события.
+## Окно выбирается по триггеру из данных миссии (`Mission.data["windows"]`).
+## Окна перебираются в порядке массива: порядок элементов — порядок проверки
+## (`02-format.md` §9). Запертая дверь симметрична: подход со стороны `b`
+## упирается в неё так же, как со стороны `a`, поэтому ребро ищется через
+## `edge_between`, а не по якорю записи.
+## Сработавшее окно запоминается (`_window_fired`): «одно окно — один
+## срабатывающий раз» (§4.2). Без этой памяти окно у всё ещё запертого ребра
+## открывалось бы заново каждый шаг, если его эффекты дверь не открыли.
 ## Завершённая миссия окна не открывает: его некому закрыть (D4).
 func _maybe_open_window() -> void:
 	if finished:
 		current_window = null
 		return
 	current_window = null
+	var windows = mission.data.get("windows", [])
+	if typeof(windows) != TYPE_ARRAY:
+		return
+	for w in windows:
+		if typeof(w) != TYPE_DICTIONARY:
+			continue
+		if _window_fired(w):
+			continue
+		var actor := _window_actor(w)
+		if actor.is_empty():
+			continue
+		var agent_id := String(actor["agent"])
+		_mark_window_fired(w)
+		current_window = WindowScript.from_data(w, agent_id)
+		_emit("window_opened", _window_event_data(w, agent_id))
+		return
+
+
+## Кто и по какому поводу открывает окно. Пусто — сейчас не открывает никто.
+func _window_actor(w: Dictionary) -> Dictionary:
+	var trigger = w.get("trigger", {})
+	if typeof(trigger) != TYPE_DICTIONARY:
+		return {}
+	var trigger_dict: Dictionary = trigger
+	match String(trigger_dict.get("type", "")):
+		"locked_edge":
+			return _actor_before_locked_edge(String(trigger_dict.get("edge", "")))
+		"node_entered":
+			return _actor_entered_node(String(trigger_dict.get("node", "")))
+		"guard_in_sensor":
+			return _actor_in_sensor(String(trigger_dict.get("sensor", "")))
+	return {}
+
+
+## Группа стоит перед запертым ребром. Порядок своих — порядок `own`, правила
+## пропуска прежние: мёртвый, дошедший до выхода и кончивший маршрут окна не открывают.
+func _actor_before_locked_edge(edge_id: String) -> Dictionary:
+	if edge_id == "":
+		return {}
 	for a in own:
 		if a.is_dead() or a.node == plan.exit_node:
 			continue
@@ -351,12 +401,99 @@ func _maybe_open_window() -> void:
 			continue
 		var target := String(a.waypoints[a.waypoint_index])
 		var e: Dictionary = mission.edge_between(a.node, target)
-		if e.is_empty():
+		if e.is_empty() or String(e["id"]) != edge_id:
 			continue
 		if _is_locked(e):
-			current_window = WindowScript.locked_door(String(e["id"]), a.id)
-			_emit("window_opened", {"kind": "locked_door", "edge": e["id"], "agent": a.id})
-			return
+			return {"agent": a.id}
+	return {}
+
+
+## Группа ВОШЛА в помещение: в этом шаге был `agent_moved` в него. «Находится
+## в помещении давно» окном быть не может — иначе оно открывалось бы каждый шаг.
+func _actor_entered_node(node_id: String) -> Dictionary:
+	if node_id == "":
+		return {}
+	for e in _step_events():
+		if String(e["type"]) == "agent_moved" and String(e["data"]["node"]) == node_id:
+			return {"agent": String(e["data"]["agent"])}
+	return {}
+
+
+## Охрана вошла в зону сенсора: в этом шаге был `sensor_contact`, а помещение
+## контакта видно этому сенсору. Контакт снимается на входе (переход «не видно ->
+## видно»), поэтому «охрана стоит в зоне давно» окна не открывает.
+func _actor_in_sensor(sensor_id: String) -> Dictionary:
+	if sensor_id == "":
+		return {}
+	for e in _step_events():
+		if String(e["type"]) != "sensor_contact":
+			continue
+		if _sensor_sees(sensor_id, String(e["data"]["node"])):
+			return {"agent": String(e["data"]["agent"])}
+	return {}
+
+
+func _sensor_sees(sensor_id: String, node_id: String) -> bool:
+	for s in mission.sensors:
+		if String(s["id"]) == sensor_id:
+			return (s["nodes"] as Array).has(node_id)
+	return false
+
+
+## События текущего шага: триггеры `node_entered` и `guard_in_sensor` смотрят на
+## вход именно в этом шаге, а не на состояние мира вообще.
+func _step_events() -> Array:
+	var out: Array = []
+	for e in events:
+		if int(e["step"]) == scales.step:
+			out.append(e)
+	return out
+
+
+## Сработавшее окно помним по id из данных; окно у запертого ребра — ещё и по
+## ребру: «повторные окна на одно и то же ребро не поддерживаются» (§4.2).
+func _window_fired(w: Dictionary) -> bool:
+	var wid := String(w.get("id", ""))
+	if wid != "" and bool(fired_windows.get(wid, false)):
+		return true
+	var edge_id := _locked_edge_of(w)
+	return edge_id != "" and bool(fired_edges.get(edge_id, false))
+
+
+func _mark_window_fired(w: Dictionary) -> void:
+	var wid := String(w.get("id", ""))
+	if wid != "":
+		fired_windows[wid] = true
+	var edge_id := _locked_edge_of(w)
+	if edge_id != "":
+		fired_edges[edge_id] = true
+
+
+## Ребро окна, если его триггер — запертое ребро; иначе пусто.
+func _locked_edge_of(w: Dictionary) -> String:
+	var trigger = w.get("trigger", {})
+	if typeof(trigger) != TYPE_DICTIONARY:
+		return ""
+	var trigger_dict: Dictionary = trigger
+	if String(trigger_dict.get("type", "")) != "locked_edge":
+		return ""
+	return String(trigger_dict.get("edge", ""))
+
+
+## Данные события `window_opened`. У запертого ребра набор полей прежний
+## (`kind`, `edge`, `agent`); у новых триггеров якорь лежит в поле своего вида:
+## подставлять id помещения в `edge` значило бы врать в данных события.
+func _window_event_data(w: Dictionary, agent_id: String) -> Dictionary:
+	var trigger = w.get("trigger", {})
+	var type := ""
+	if typeof(trigger) == TYPE_DICTIONARY:
+		type = String((trigger as Dictionary).get("type", ""))
+	var out := {"kind": WindowScript.kind_for(type)}
+	var anchor := WindowScript.anchor_key(type)
+	if anchor != "" and typeof(trigger) == TYPE_DICTIONARY:
+		out[anchor] = String((trigger as Dictionary).get(anchor, ""))
+	out["agent"] = agent_id
+	return out
 
 
 ## Приказ или молчание. Возвращает решение и причину отказа, если он есть.
@@ -420,7 +557,9 @@ func _resolve_silence(w: Dictionary) -> Dictionary:
 	return {"by": "comms", "quality": "bad"}
 
 
-## Приказ из окна. Все эффекты — здесь, чтобы правило жило в одном месте.
+## Приказ из окна. Порядок применения фиксирован: сначала цена варианта, потом его
+## эффекты. Все эффекты идут через один применятель, чтобы правило жило в одном
+## месте, а не порознь в приказе и молчании.
 func _apply_option(w: Dictionary, option_id: String) -> void:
 	var chosen: Dictionary = {}
 	for o in w["options"]:
@@ -428,25 +567,55 @@ func _apply_option(w: Dictionary, option_id: String) -> void:
 			chosen = o
 	if chosen.is_empty():
 		return
+	_apply_cost(w, chosen)
+	for effect in chosen.get("effects", []):
+		_apply_effect(w, effect)
+
+
+## Цена варианта: `cost.noise` и `cost.delay` из данных (прежде — поля варианта).
+func _apply_cost(w: Dictionary, chosen: Dictionary) -> void:
 	var noise := int(chosen.get("noise", 0))
 	if noise > 0:
 		scales.add_noise(noise)
 	_apply_delay(w, int(chosen.get("delay", 0)))
-	_unlock(w)
 
 
+## Молчание: качество выбирает `_resolve_silence` (кубик только там, D7), а набор
+## эффектов приходит из данных — `silence[quality]`. Порядок — как записан в данных.
 func _apply_silence(w: Dictionary, eff: Dictionary) -> void:
-	match String(eff["quality"]):
-		"good":
-			pass                      # связист нашёл способ: дверь открыта, времени не потрачено
-		"neutral":
-			_apply_delay(w, 3)
-		"bad":
-			_apply_delay(w, 3)
-			scales.add_noise(5)       # шум, которого никто не планировал
-		_:
-			_apply_delay(w, 3)        # тактик обходит: дольше, но тихо
-	_unlock(w)
+	var by_quality: Dictionary = w.get("silence", {})
+	for effect in by_quality.get(String(eff["quality"]), []):
+		_apply_effect(w, effect)
+
+
+## Один применятель эффектов из данных: цена варианта, эффекты молчания и
+## `fallback` заявки на новую механику (`02-format.md` §4.4, §7).
+func _apply_effect(w: Dictionary, effect) -> void:
+	if typeof(effect) != TYPE_DICTIONARY:
+		return
+	var effect_dict: Dictionary = effect
+	match String(effect_dict.get("type", "")):
+		"unlock":
+			_unlock(w, String(effect_dict.get("edge", "")))
+		"noise":
+			var added := int(effect_dict.get("value", 0))
+			if added > 0:
+				scales.add_noise(added)
+		"delay":
+			_apply_delay(w, int(effect_dict.get("value", 0)))
+		"engine_proposal":
+			## Ядро заявку не исполняет и ничего не «дорисовывает»: применяется
+			## `fallback` — то, что делает уровень проходимым уже сегодня (§7).
+			_apply_fallback(w, effect_dict.get("fallback", []))
+
+
+## `fallback` бывает объектом или массивом эффектов: форматы равнозначны (§7).
+func _apply_fallback(w: Dictionary, fallback) -> void:
+	if typeof(fallback) == TYPE_ARRAY:
+		for effect in fallback:
+			_apply_effect(w, effect)
+	elif typeof(fallback) == TYPE_DICTIONARY:
+		_apply_effect(w, fallback)
 
 
 func _apply_delay(w: Dictionary, amount: int) -> void:
@@ -457,10 +626,14 @@ func _apply_delay(w: Dictionary, amount: int) -> void:
 			a.delay += amount
 
 
-func _unlock(w: Dictionary) -> void:
-	var edge_id := String(w.get("edge", ""))
-	if edge_id != "":
-		unlocked[edge_id] = true
+## Открыть ребро. Ребро приходит из эффекта; если эффект его не назвал, берём ребро
+## окна — так же, как это делал прежний `_unlock(w)`.
+func _unlock(w: Dictionary, edge_id: String) -> void:
+	var target := edge_id
+	if target == "":
+		target = String(w.get("edge", ""))
+	if target != "":
+		unlocked[target] = true
 
 
 ## Свидетель. Один триггер ранит, три убивают — не наоборот (design.md §13.5).

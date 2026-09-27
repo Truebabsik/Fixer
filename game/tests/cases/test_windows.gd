@@ -225,6 +225,29 @@ func _make_b_side():
 	m.add_edge("e_cell_hall", "cell", "hall", "door", 1, 0, true)
 	m.add_edge("e_hall_exit", "hall", "exit", "corridor", 1, 0)
 	m.objective = "exit"
+	## Окно берётся из данных: без описания окна ядру нечего открывать на ребре.
+	m.set_data({"windows": [{
+		"id": "w_b_side_door",
+		"kind": "locked_edge",
+		"trigger": {"type": "locked_edge", "edge": "e_cell_hall"},
+		"text_key": "window.w_b_side_door.text",
+		"options": [
+			{"id": "breach", "text_key": "window.w_b_side_door.breach", "complexity": 1,
+				"cost": {"noise": 8, "delay": 0},
+				"effects": [{"type": "unlock", "edge": "e_cell_hall"}]},
+			{"id": "pick", "text_key": "window.w_b_side_door.pick", "complexity": 2,
+				"cost": {"noise": 1, "delay": 2},
+				"effects": [{"type": "unlock", "edge": "e_cell_hall"}]},
+		],
+		"silence": {
+			"text_key": "window.w_b_side_door.silence",
+			"good": [{"type": "unlock", "edge": "e_cell_hall"}],
+			"neutral": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_cell_hall"}],
+			"bad": [{"type": "delay", "value": 3}, {"type": "noise", "value": 5},
+				{"type": "unlock", "edge": "e_cell_hall"}],
+			"safe": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_cell_hall"}],
+		},
+	}]})
 	var p := Plan.new()
 	p.route = ["cell", "hall", "exit"]
 	p.exit_node = "exit"
@@ -247,6 +270,29 @@ func _make_reverse_side():
 	m.add_edge("e_far_near", "far_hall", "near_hall", "door", 1, 0, true)
 	m.add_edge("e_far_exit", "far_hall", "far_exit", "corridor", 1, 0)
 	m.objective = "far_exit"
+	## Окно берётся из данных: без описания окна ядру нечего открывать на ребре.
+	m.set_data({"windows": [{
+		"id": "w_reverse_door",
+		"kind": "locked_edge",
+		"trigger": {"type": "locked_edge", "edge": "e_far_near"},
+		"text_key": "window.w_reverse_door.text",
+		"options": [
+			{"id": "breach", "text_key": "window.w_reverse_door.breach", "complexity": 1,
+				"cost": {"noise": 8, "delay": 0},
+				"effects": [{"type": "unlock", "edge": "e_far_near"}]},
+			{"id": "pick", "text_key": "window.w_reverse_door.pick", "complexity": 2,
+				"cost": {"noise": 1, "delay": 2},
+				"effects": [{"type": "unlock", "edge": "e_far_near"}]},
+		],
+		"silence": {
+			"text_key": "window.w_reverse_door.silence",
+			"good": [{"type": "unlock", "edge": "e_far_near"}],
+			"neutral": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_far_near"}],
+			"bad": [{"type": "delay", "value": 3}, {"type": "noise", "value": 5},
+				{"type": "unlock", "edge": "e_far_near"}],
+			"safe": [{"type": "delay", "value": 3}, {"type": "unlock", "edge": "e_far_near"}],
+		},
+	}]})
 	var p := Plan.new()
 	p.route = ["near_hall", "far_hall", "far_exit"]
 	p.exit_node = "far_exit"

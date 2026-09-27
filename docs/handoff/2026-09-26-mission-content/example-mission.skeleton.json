@@ -1,5 +1,4 @@
 {
-  "_comment": "ОБРАЗЕЦ ФОРМЫ. Это не контент миссии, а скелет: он показывает структуру файла и связи между разделами. Числа и названия здесь условны. Скопируй структуру, замени содержимое. В настоящем файле поля _comment быть не должно — комментарии в JSON запрещены.",
   "id": "mission-01",
   "title_key": "mission.01.title",
   "nodes": {
@@ -38,8 +37,7 @@
     { "id": "e_office_kitchen", "a": "office2",     "b": "kitchen2",   "kind": "corridor",     "steps": 1, "noise": 0 },
     { "id": "e_office_term2",   "a": "office2",     "b": "term2",      "kind": "door",         "steps": 1, "noise": 0 },
 
-    { "id": "e_office_it4",     "a": "office2",     "b": "it4",        "kind": "stairs",       "steps": 12, "noise": 0, "locked": true,
-      "_comment": "биометрия на серверной: это ОКНО, а не просто дверь" },
+    { "id": "e_office_it4",     "a": "office2",     "b": "it4",        "kind": "stairs",       "steps": 12, "noise": 0, "locked": true },
     { "id": "e_it4_term4",      "a": "it4",         "b": "term4",      "kind": "door",         "steps": 1, "noise": 0 },
     { "id": "e_it4_floor5",     "a": "it4",         "b": "floor5",     "kind": "stairs",       "steps": 3, "noise": 0 },
 
@@ -47,6 +45,8 @@
     { "id": "e_floor5_term5",   "a": "floor5",      "b": "term5",      "kind": "door",         "steps": 1, "noise": 0 },
 
     { "id": "e_liftmain_1_5",   "a": "lift_main1",  "b": "floor5",     "kind": "lift_main",    "steps": 2, "noise": 4 },
+    { "id": "e_stair_3_5",      "a": "floor3",      "b": "floor5",     "kind": "stairs",       "steps": 6, "noise": 0 },
+    { "id": "e_stair_3_it4",    "a": "floor3",      "b": "it4",        "kind": "stairs",       "steps": 3, "noise": 0 },
     { "id": "e_freight_1_4",    "a": "lift_freight1", "b": "it4",      "kind": "lift_freight", "steps": 3, "noise": 4 },
     { "id": "e_freight_4_0",    "a": "it4",         "b": "archive0",   "kind": "lift_freight", "steps": 3, "noise": 4 },
     { "id": "e_stair_2_0",      "a": "stair2",      "b": "archive0",   "kind": "stairs",       "steps": 3, "noise": 0 }
@@ -84,9 +84,10 @@
       ],
       "silence": {
         "text_key": "window.w_bio_door.silence",
-        "good":    { "type": "unlock", "edge": "e_office_it4" },
-        "neutral": { "type": "delay", "value": 3 },
-        "bad":     [{ "type": "delay", "value": 3 }, { "type": "noise", "value": 5 }],
+        "good":    [{ "type": "unlock", "edge": "e_office_it4" }],
+        "neutral": [{ "type": "delay", "value": 3 }, { "type": "unlock", "edge": "e_office_it4" }],
+        "bad":     [{ "type": "delay", "value": 3 }, { "type": "noise", "value": 5 },
+                    { "type": "unlock", "edge": "e_office_it4" }],
         "safe":    [{ "type": "delay", "value": 3 }, { "type": "unlock", "edge": "e_office_it4" }]
       }
     },
@@ -109,10 +110,10 @@
       ],
       "silence": {
         "text_key": "window.w_echo_reads.silence",
-        "good":    { "type": "noop" },
-        "neutral": { "type": "delay", "value": 2 },
+        "good":    [{ "type": "noop" }],
+        "neutral": [{ "type": "delay", "value": 2 }],
         "bad":     [{ "type": "delay", "value": 2 }, { "type": "noise", "value": 5 }],
-        "safe":    { "type": "delay", "value": 2 }
+        "safe":    [{ "type": "delay", "value": 2 }]
       }
     }
   ],

@@ -7,8 +7,17 @@ const EDGE_KINDS := ["door", "corridor", "lift_main", "lift_freight", "stairs"]
 ## Разделы данных, которые ядру передаёт контент-конвейер (content/loader.gd).
 ## Это НЕ рантайм-состояние: ядро их читает, но не меняет. `data` держит разделы,
 ## чья форма ещё не устоялась в жёстком API миссии — окна, разведданные, точки
-## доступа, тексты.
-const DATA_SECTIONS := ["windows", "intel", "access_points", "texts"]
+## доступа, тексты, название уровня.
+##
+## Умолчания разные: разделы-списки начинаются пустым массивом, `title_key` — пустой
+## строкой. Поэтому список и умолчания разведены, а не собраны одним циклом.
+const DATA_SECTIONS := ["windows", "intel", "access_points", "texts", "title_key"]
+## Держать в согласии с `Validator.ARRAY_SECTIONS` (`content/validator.gd:43`): там — ВСЕ
+## шесть корневых массивов ФАЙЛА (`edges`, `patrols`, `sensors` живут в жёстком API миссии
+## и через `data` не едут), здесь — что модель принимает в `data`. Списки не равны
+## дословно, но новая секция контента обязана появиться в обоих, иначе файл пройдёт
+## валидатор, а раздел молча не доедет до модели (`set_data` его не знает).
+const DATA_ARRAY_SECTIONS := ["windows", "intel", "access_points", "texts"]
 
 var id: String = ""
 var nodes: Dictionary = {}
@@ -17,14 +26,15 @@ var patrols: Array = []
 var sensors: Array = []
 var objective: String = ""
 
-## Разделы контента, не входящие в жёсткое API выше. Пустой словарь с пустыми
-## массивами — валидное состояние: фикстура собирает миссию прежним API.
+## Разделы контента, не входящие в жёсткое API выше. Фикстура собирает миссию
+## прежним API, поэтому пустые разделы — валидное состояние.
 var data: Dictionary = {}
 
 
 func _init() -> void:
-	for section in DATA_SECTIONS:
+	for section in DATA_ARRAY_SECTIONS:
 		data[section] = []
+	data["title_key"] = ""
 
 
 ## Принять разделы контента. Ключи, которых схема не знает, здесь не проверяются:
