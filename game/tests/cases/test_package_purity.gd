@@ -19,9 +19,13 @@ extends RefCounted
 ##     и НИ ОДИН файл комплекта не остался непокрытым — иначе «манифест сошёлся» читалось бы
 ##     про подмножество;
 ##   * документы, названные в файлах пакета (в том числе в КОПИЯХ модулей), в пакете
-##     существуют: имя вида `01-format.md` — обещание файла получателю;
+##     существуют: имя вида `01-format.md` — обещание файла получателю. Спрашивается
+##     ЛЮБОЕ имя вида `файл.md`, а не только двухцифровое: наши внутренние документы
+##     (`design.md`, `mercs.md`, путь `levels/...`) под двухцифровую форму не подпадают,
+##     и копия уносила их наружу молча. Исключение ровно одно — имя файла, который
+##     создаёт САМ исполнитель (`report.md`): это обещание, а не файл пакета;
 ##   * самодостаточность: в файлах пакета нет путей нашего репозитория, внутренних кодов
-##     решений и имени нашего набора тестов.
+##     решений, имён наших внутренних документов и имени нашего набора тестов.
 ## Правка боевого кода ничего из этого не задевает. Меняется пакет — меняется и он сам:
 ## пересобирается из кода, манифест пересчитывается, и все три проверки снова смотрятся
 ## в одно место.
@@ -65,8 +69,9 @@ const OWN_PROJECT_PREFIX := "kit/verifier/"
 ## Пути внутри манифеста относительны ЭТОЙ папки (у образца — `../example/...`).
 const MANIFEST_RELATIVE := "kit/verifier/SHA256SUMS"
 
-## Боевые модули, копии которых лежат в комплекте (`kit/verifier/`). Список явный:
-## новый модуль в комплекте обязан появиться здесь, иначе проверка его не увидит.
+## Боевые модули, копии которых лежат в комплекте (`kit/verifier/`): полное замыкание
+## `preload` от `content/validator.gd`. Список явный: новый модуль в комплекте обязан
+## появиться здесь, иначе проверка его не увидит — а копия уезжает получателю.
 const BATTLE_MODULES := [
 	"content/validator.gd",
 	"content/problems.gd",
@@ -74,6 +79,20 @@ const BATTLE_MODULES := [
 	"sim/mission.gd",
 	"sim/plan.gd",
 	"sim/response.gd",
+	"sim/sim.gd",
+	"sim/agent.gd",
+	"sim/radio.gd",
+	"sim/scales.gd",
+	"sim/understanding.gd",
+	"sim/window.gd",
+]
+
+## Боевые ДАННЫЕ, копии которых лежат в комплекте образцом (`kit/example/`): у них
+## другой адрес копии, поэтому они отдельной таблицей, а не строкой в списке модулей.
+## Проверяются они так же: служебный `note` в данных уезжает получателю вместе с файлом.
+const BATTLE_DATA := [
+	{"battle": "content/mission-01.json", "kit": "kit/example/mission.example.json"},
+	{"battle": "content/texts.ru.json", "kit": "kit/example/texts.example.json"},
 ]
 
 ## Якоря пакета. Не перечень состава (пакет может расти), а пол: без этих файлов
@@ -131,8 +150,8 @@ const RULES := [
 		"pattern": "docs\\\\", "skip_in_own_project": false},
 	{"id": "repo-game", "name": "путь нашей папки проекта `game/`",
 		"pattern": "game/", "skip_in_own_project": false},
-	{"id": "dnn", "name": "внутренний код решения `DNN`",
-		"pattern": "\\bD[0-9]{2}\\b", "skip_in_own_project": false},
+	{"id": "dnn", "name": "внутренний код решения (`D` и цифры)",
+		"pattern": "\\bD[0-9]+\\b", "skip_in_own_project": false},
 	{"id": "res-tests", "name": "наш набор тестов `res://tests`",
 		"pattern": "res://tests", "skip_in_own_project": false},
 	{"id": "review", "name": "ссылка на наш разбор `review-`",
@@ -143,8 +162,14 @@ const RULES := [
 		"pattern": "res://sim", "skip_in_own_project": true},
 ]
 
-## Имя документа пакета: две цифры, дефис, имя. По такой ссылке и спрашивается файл.
-const DOCUMENT_REFERENCE := "[0-9]{2}-[A-Za-z0-9_\\-]+\\.md"
+## Имя документа в тексте: ЛЮБОЕ имя вида `файл.md`. По такой ссылке и спрашивается файл —
+## названный документ есть обещание получателю, а не украшение комментария.
+const DOCUMENT_REFERENCE := "[A-Za-z0-9_\\-]+\\.md"
+
+## Имена, которые называет САМ исполнитель: он их создаёт, а не получает в пакете, поэтому
+## требовать их наличия в пакете нельзя. `report.md` — отчёт о самопроверке; шаблон к нему
+## в пакете есть и называется `08-report.md`.
+const DELIVERABLE_REFERENCES := ["report.md"]
 
 ## Форма строки манифеста: 64 шестнадцатеричных знака, два пробела, путь внутри комплекта
 ## (у образца — с `../`). Строка другой формы не глотается молча, а называется номером.
@@ -158,6 +183,12 @@ const DIRTY_RULES := ["dnn", "docs-backslash", "docs-slash", "repo-game", "res-c
 	"res-sim", "res-tests", "review"]
 const DIRTY_RULES_OWN_PROJECT := ["dnn", "docs-backslash", "docs-slash", "repo-game",
 	"res-tests", "review"]
+
+## Однозначный код решения — отдельный контроль. Правило, ловящее только `DNN` с двумя
+## цифрами, пропускает `D5` из той же серии решений; ровно так однозначные коды и уехали
+## в комплект. Контроль написан отдельной строкой, а не добавлен в `DIRTY_SAMPLE`: там
+## сверяется НАБОР сработавших правил, и второй код той же серии его не изменил бы.
+const SHORT_DNN_SAMPLE := "## решение D7\n"
 
 
 ## Поиск нарушений в тексте. Нарушение — словарь, а не строка: контрольным ассертам
@@ -208,11 +239,15 @@ func _brief(violations: Array) -> String:
 	return "; ".join(parts)
 
 
-## Имена документов пакета, названные в тексте.
+## Имена документов, названные в тексте. Имя, которое создаёт сам исполнитель
+## (`DELIVERABLE_REFERENCES`), пропускается: его в пакете нет и быть не должно.
 func _documents_in_text(text: String, regex: RegEx) -> Array:
 	var out: Array = []
 	for found in regex.search_all(text):
-		out.append(found.get_string())
+		var name := found.get_string()
+		if DELIVERABLE_REFERENCES.has(name):
+			continue
+		out.append(name)
 	return out
 
 
@@ -297,6 +332,10 @@ func run() -> Array:
 		% ", ".join(_rules_of(dirty_own)), _rules_of(dirty_own), DIRTY_RULES_OWN_PROJECT)
 	var clean := _scan_text(CLEAN_SAMPLE, "(контроль)", false, regexes)
 	t.eq("детектор молчит на чистом тексте: %s" % _brief(clean), clean, [])
+	var short_dnn := _scan_text(SHORT_DNN_SAMPLE, "(контроль)", false, regexes)
+	t.eq("детектор ловит однозначный код решения (образец «%s»): сработали правила: %s"
+		% [SHORT_DNN_SAMPLE.strip_edges(), ", ".join(_rules_of(short_dnn))],
+		_rules_of(short_dnn), ["dnn"])
 
 	# 2. Корпус. Пустой или обрезанный корпус делает проверку вырожденной, поэтому
 	# непустота — отдельные ассерты, а не подразумеваемое условие.
@@ -325,8 +364,10 @@ func run() -> Array:
 			String(relative).begins_with(OWN_PROJECT_PREFIX), regexes))
 		documents.append_array(_documents_in_text(String(text), document_regex))
 
-	# 4. Ссылка на документ пакета: имя вида `01-format.md` обязано в пакете быть.
-	# Именно на этом разъехались старые номера (`02-format.md`, `design.md`).
+	# 4. Ссылка на документ: любое названное имя вида `файл.md` обязано в пакете быть —
+	# кроме имени, которое создаёт сам исполнитель (`DELIVERABLE_REFERENCES`). Именно на
+	# этом разъехались старые номера (`02-format.md`) и наши внутренние документы
+	# (`design.md`, `scales.md`, путь `levels/...`), которых у получателя нет.
 	var referenced := _unique_sorted(documents)
 	var absent_documents: Array = []
 	for name in referenced:
@@ -340,16 +381,21 @@ func run() -> Array:
 	t.eq("пакет наружу самодостаточен (%d файлов, названо документов: %d): %s"
 		% [package_files.size(), referenced.size(), _brief(violations)], violations, [])
 
-	# 6. Копии боевых модулей: каждая обязана быть в комплекте. Побайтовое равенство
-	# боевому модулю здесь НЕ проверяется — оно свойство момента сборки, а не вечное
-	# (см. шапку файла); проверяется то, что верно всегда: копия ЕСТЬ, она чиста (общий
-	# обход выше), названные в ней документы в пакете существуют (п. 4) и её SHA-256
-	# сходится с манифестом (п. 7).
+	# 6. Копии боевых источников: каждая обязана быть в комплекте — и модуль, и данные.
+	# Побайтовое равенство боевому модулю здесь НЕ проверяется — оно свойство момента
+	# сборки, а не вечное (см. шапку файла); проверяется то, что верно всегда: копия ЕСТЬ,
+	# она чиста (общий обход выше), названные в ней документы в пакете существуют (п. 4)
+	# и её SHA-256 сходится с манифестом (п. 7).
 	var kit_missing: Array = []
 	for module in BATTLE_MODULES:
 		if not package_files.has("%s%s" % [OWN_PROJECT_PREFIX, String(module)]):
 			kit_missing.append("%s%s" % [OWN_PROJECT_PREFIX, String(module)])
-	t.eq("копии боевых модулей в комплекте есть — нет: %s" % _brief_list(kit_missing),
+	for i in BATTLE_DATA.size():
+		var data_source: Dictionary = BATTLE_DATA[i]
+		if not package_files.has(String(data_source["kit"])):
+			kit_missing.append(String(data_source["kit"]))
+	t.eq("копии боевых модулей и данных в комплекте есть (%d источников) — нет: %s"
+		% [BATTLE_MODULES.size() + BATTLE_DATA.size(), _brief_list(kit_missing)],
 		kit_missing, [])
 
 	# 7. МАНИФЕСТ: пакет сверяется сам с собой. Получатель проверяет комплект
@@ -405,25 +451,32 @@ func run() -> Array:
 	t.eq("манифест покрывает весь комплект и образец (%d файлов, кроме самого манифеста) — не покрыто: %s"
 		% [kit_to_cover.size(), _brief_list(uncovered)], uncovered, [])
 
-	# 8. Боевые модули — источник копий комплекта. Чистота боевого модуля (нет наших путей,
-	# внутренних кодов решений, ссылок на наш набор) — свойство, верное ВСЕГДА: боевой модуль
-	# уезжает наружу копией, и грязь уедет вместе с ним. А вот «документы, которые называет
-	# боевой модуль, есть в пакете» — проверка момента копирования, НЕ вечная: стоит боевому
-	# модулю назвать документ новой поставки, как кейс покраснел бы на здоровом коде — тот же
-	# класс, что снятое побайтовое равенство. Это свойство проверяет СБОРКА пакета (копии
-	# кладутся из боевых модулей, и ссылки сверяются тогда же), а в наборе остаётся его вечная
-	# половина — сверка по КОПИЯМ, которые и лежат у получателя (п. 4 и 7 выше).
-	var module_violations: Array = []
+	# 8. Боевые источники — источник копий комплекта: модули И данные (образец). Чистота
+	# боевого источника (нет наших путей, внутренних кодов решений, ссылок на наш набор) —
+	# свойство, верное ВСЕГДА: он уезжает наружу копией, и грязь уедет вместе с ним. А вот
+	# «документы, которые называет боевой источник, есть в пакете» — проверка момента
+	# копирования, НЕ вечная: стоит боевому модулю назвать документ новой поставки, как кейс
+	# покраснел бы на здоровом коде — тот же класс, что снятое побайтовое равенство. Это
+	# свойство проверяет СБОРКА пакета (копии кладутся из боевых файлов, и ссылки сверяются
+	# тогда же), а в наборе остаётся его вечная половина — сверка по КОПИЯМ, которые и лежат
+	# у получателя (п. 4 и 7 выше).
+	var battle_sources: Array = []
 	for module in BATTLE_MODULES:
-		var module_path: String = ProjectSettings.globalize_path("res://").path_join(String(module)).simplify_path()
+		battle_sources.append(String(module))
+	for i in BATTLE_DATA.size():
+		battle_sources.append(String((BATTLE_DATA[i] as Dictionary)["battle"]))
+	var module_violations: Array = []
+	for source in battle_sources:
+		var module_path: String = ProjectSettings.globalize_path("res://").path_join(String(source)).simplify_path()
 		var module_text: Variant = _read_text(module_path)
 		if module_text == null:
 			module_violations.append({"id": "unreadable", "rule": "файл не прочитан",
-				"where": String(module), "line": module_path})
+				"where": String(source), "line": module_path})
 			continue
-		module_violations.append_array(_scan_text(String(module_text), String(module), true, regexes))
-	t.eq("боевые модули комплекта чисты (нарушений: %d): %s"
-		% [module_violations.size(), _brief(module_violations)], module_violations, [])
+		module_violations.append_array(_scan_text(String(module_text), String(source), true, regexes))
+	t.eq("боевые источники копий чисты (%d: модули комплекта и данные; нарушений: %d): %s"
+		% [battle_sources.size(), module_violations.size(), _brief(module_violations)],
+		module_violations, [])
 
 	return t.results
 

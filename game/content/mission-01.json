@@ -498,7 +498,7 @@
       "kind": "locked_edge",
       "trigger": { "type": "locked_edge", "edge": "e_freight_4_0" },
       "text_key": "window.w_stuck_lift.text",
-      "note": "триггер предполагает: при тревоге движок блокирует Л2 с группой на ребре (05 §5) и открывает окно; без этого оно не сработает — см. report.md §3.2",
+      "note": "триггер предполагает: при тревоге движок блокирует Л2 с группой на ребре (04-numbers.md, «Группа реагирования») и открывает окно; без этого оно не сработает — см. 08-report.md §3.2",
       "options": [
         { "id": "hack_out", "text_key": "window.w_stuck_lift.hack_out", "complexity": 3,
           "cost": { "noise": 1, "delay": 4 },
@@ -572,7 +572,7 @@
       "entries": [
         { "kind": "patrol", "id": "guard_1", "route": ["reception1", "hall1", "stair1"], "period": 5,
           "age_hours": 6, "false": false, "note_key": "intel.agents.guard1",
-          "note": "призрак расходится ДВАЖДЫ (D48): путь назван шире настоящего (приёмная → холл → лестница, а охрана ходит только reception1↔hall1), и ритм другой (5 против 4)" },
+          "note": "призрак расходится ДВАЖДЫ: путь назван шире настоящего (приёмная → холл → лестница, а охрана ходит только reception1↔hall1), и ритм другой (5 против 4)" },
         { "kind": "patrol", "id": "guard_2", "route": ["dock1", "hall1", "stair1"], "period": 7,
           "age_hours": 6, "false": false, "note_key": "intel.agents.guard2",
           "note": "то же: путь назван шире настоящего (док → холл → лестница против dock1↔hall1), ритм — другой (7 против 6)" },

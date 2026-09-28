@@ -10,7 +10,7 @@ extends SceneTree
 ##
 ## Что ищется по всем файлам пакета (кэш движка `.godot` не смотрим):
 ## 1) путь нашего репозитория: `docs` и следующий за ним слэш — прямой или обратный;
-## 2) внутренний код решения: латинская `D` и две цифры подряд;
+## 2) внутренний код решения: латинская `D` и цифры подряд — одной цифры тоже достаточно,
 ## 3) имя нашего набора тестов: `res://` и следом `tests`;
 ## 4) ссылка на наши документы ревью: `review` и следом дефис;
 ## 5) путь папки нашего проекта: `game` и следующий за ним прямой слэш — у получателя
@@ -19,9 +19,12 @@ extends SceneTree
 ##    собственного проекта комплекта. Внутри `kit/verifier/**` они верны: там `res://`
 ##    и указывает на папку комплекта (`verify.gd` грузит `res://` с `content`).
 ##
-## Вторая половина той же проверки — ссылки на документы: имя вида `01-format.md`,
+## Вторая половина той же проверки — ссылки на документы: ЛЮБОЕ имя вида `файл.md`,
 ## названное в файлах пакета, обязано в пакете существовать. Именно этой половины не
-## хватало, когда комментарии ссылались на документы с номерами, которых в пакете нет.
+## хватало, когда комментарии ссылались на документы, которых в пакете нет: и на старые
+## номера документов формы, и на наши внутренние документы, и на пути вида `levels/...`.
+## Исключение ровно одно — имя файла, который создаёт САМ получатель (`report.md`):
+## он его пишет, а не получает в пакете, и требовать его наличия нельзя.
 ##
 ## САМ ЭТОТ ФАЙЛ — не исключение: он лежит в пакете и проверяется наравне со всеми,
 ## поэтому не имеет права содержать то, что ищет. Строки правил и контрольная строка
@@ -83,6 +86,12 @@ const REQUIRED_RELATIVE := [
 	"kit/verifier/sim/mission.gd",
 	"kit/verifier/sim/plan.gd",
 	"kit/verifier/sim/response.gd",
+	"kit/verifier/sim/sim.gd",
+	"kit/verifier/sim/agent.gd",
+	"kit/verifier/sim/radio.gd",
+	"kit/verifier/sim/scales.gd",
+	"kit/verifier/sim/understanding.gd",
+	"kit/verifier/sim/window.gd",
 ]
 
 ## Правила поиска. `id` — короткое имя для самопроверки детектора, `name` — то, что
@@ -94,8 +103,8 @@ const RULES := [
 		"pattern": "docs" + "\\\\", "skip_in_own_project": false},
 	{"id": "repo-game", "name": "путь нашего проекта (`game` и прямой слэш)",
 		"pattern": "game" + "/", "skip_in_own_project": false},
-	{"id": "dnn", "name": "внутренний код решения (`D` и две цифры)",
-		"pattern": "\\bD[0-9]{2}\\b", "skip_in_own_project": false},
+	{"id": "dnn", "name": "внутренний код решения (`D` и цифры)",
+		"pattern": "\\bD" + "[0-9]+\\b", "skip_in_own_project": false},
 	{"id": "res-tests", "name": "имя нашего набора тестов (`res://` и `tests`)",
 		"pattern": "res://" + "tests", "skip_in_own_project": false},
 	{"id": "review", "name": "ссылка на наши документы ревью (`review` и дефис)",
@@ -106,13 +115,19 @@ const RULES := [
 		"pattern": "res://" + "sim", "skip_in_own_project": true},
 ]
 
-## Имя документа пакета: две цифры, дефис, имя. По такой ссылке и спрашивается файл.
-const DOCUMENT_REFERENCE := "[0-9]{2}-[A-Za-z0-9_\\-]+\\.md"
+## Имя документа в тексте: ЛЮБОЕ имя вида `файл.md`. По такой ссылке и спрашивается файл —
+## названный документ есть обещание получателю, а не украшение комментария.
+const DOCUMENT_REFERENCE := "[A-Za-z0-9_\\-]+\\.md"
+
+## Имена, которые называет САМ получатель: он их создаёт, а не получает в пакете, поэтому
+## требовать их наличия в пакете нельзя. `report.md` — его отчёт о самопроверке; шаблон
+## к нему в пакете есть и называется `08-report.md`.
+const DELIVERABLE_REFERENCES := ["report.md"]
 
 ## Контрольная строка самопроверки детектора: та же грязь, собранная из частей. Написана
 ## руками и НЕЗАВИСИМО от `RULES`: эталон, собранный из проверяемого списка, мутацию в нём
 ## не краснеет.
-const DIRTY_SAMPLE := ("# " + "docs" + "/spr/scales.md и " + "docs" + "\\spr\\scales.md\n"
+const DIRTY_SAMPLE := ("# " + "docs" + "/spr/scales" + ".md и " + "docs" + "\\spr\\scales" + ".md\n"
 	+ "## решение " + "D" + "99\n"
 	+ "## res://" + "tests/run.gd\n"
 	+ "## " + "review" + "-03 §7.5\n"
@@ -122,6 +137,13 @@ const DIRTY_RULES := ["dnn", "docs-backslash", "docs-slash", "repo-game", "res-c
 	"res-sim", "res-tests", "review"]
 const DIRTY_RULES_OWN_PROJECT := ["dnn", "docs-backslash", "docs-slash", "repo-game",
 	"res-tests", "review"]
+
+## Однозначный код решения — отдельный контроль. Правило, ловящее только код из двух цифр,
+## пропускает однозначный код той же серии решений; ровно так такие коды и уехали в комплект.
+## Контроль отдельной строкой, а не добавкой в `DIRTY_SAMPLE`: там сверяется НАБОР
+## сработавших правил, и второй код той же серии его не изменил бы. Строка собрана из
+## частей — этот файл лежит в пакете и проверяется наравне со всеми.
+const SHORT_DNN_SAMPLE := "## решение " + "D" + "7\n"
 
 var _verdict_reached := false
 var _regexes: Array = []
@@ -194,6 +216,12 @@ func _detector_self_check() -> Array:
 	if fired_own != DIRTY_RULES_OWN_PROJECT:
 		out.append("самопроверка детектора: внутри своего проекта сработали правила %s, а обязаны были %s"
 			% [", ".join(fired_own), ", ".join(DIRTY_RULES_OWN_PROJECT)])
+	## Однозначный код решения: правило из двух цифр этот контроль проходит, а правило,
+	## которое ищет цифры без ограничения длины, обязано назвать ровно `dnn`.
+	var fired_short := _rules_of(_scan_text(SHORT_DNN_SAMPLE, "(контроль)", false))
+	if fired_short != ["dnn"]:
+		out.append("самопроверка детектора: на однозначном коде решения («%s») сработали правила %s, а обязано было только %s"
+			% [SHORT_DNN_SAMPLE.strip_edges(), ", ".join(fired_short), "dnn"])
 	return out
 
 
@@ -308,11 +336,15 @@ func _violation_text(violation: Dictionary) -> String:
 		String(violation["line"])]
 
 
-## Имена документов пакета, названные в тексте. Проверяются они, а не смысл ссылки.
+## Имена документов, названные в тексте. Имя, которое создаёт сам получатель
+## (`DELIVERABLE_REFERENCES`), пропускается: его в пакете нет и быть не должно.
 func _documents_in_text(text: String) -> Array:
 	var out: Array = []
 	for found in _document_regex.search_all(text):
-		out.append(found.get_string())
+		var name := found.get_string()
+		if DELIVERABLE_REFERENCES.has(name):
+			continue
+		out.append(name)
 	return out
 
 
